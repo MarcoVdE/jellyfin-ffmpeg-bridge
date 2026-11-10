@@ -48,34 +48,50 @@ func main() {
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
 	}
+	code := dispatch(cmd, os.Args[2:])
+	// Started in a console window of its own (double-click, or Windows sudo
+	// in "new window" mode)? Keep it open so the output can be read. Never
+	// for "run": the boot task must exit (and be restarted) without waiting.
+	if cmd != "run" {
+		pauseIfOwnConsole()
+	}
+	os.Exit(code)
+}
+
+func dispatch(cmd string, args []string) int {
 	var err error
 	switch cmd {
 	case "run":
 		err = runCmd()
 	case "install":
-		err = installCmd(os.Args[2:])
+		err = installCmd(args)
 	case "uninstall":
 		err = uninstallCmd()
 	case "restart":
 		err = restartCmd()
 	case "status":
-		err = statusCmd(os.Args[2:])
+		err = statusCmd(args)
 	case "token":
 		err = tokenCmd()
 	case "selftest":
 		err = selftestCmd()
 	case "version", "-version", "--version":
 		fmt.Println("ffagent", agentVersion)
-	default:
+	case "", "help", "-h", "--help", "/?":
 		fmt.Printf(usageText, agentVersion, dataDir())
-		if cmd != "" && cmd != "help" && cmd != "-h" && cmd != "--help" {
-			os.Exit(2)
+	default:
+		fmt.Fprintf(os.Stderr, "ffagent: unknown command %q\n", cmd)
+		if strings.HasPrefix(cmd, "-") {
+			fmt.Fprintf(os.Stderr, "Did you mean:  ffagent install %s\n", strings.Join(os.Args[1:], " "))
 		}
+		fmt.Fprintln(os.Stderr, "Run `ffagent help` for all commands.")
+		return 2
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ffagent:", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func configPath() string { return filepath.Join(dataDir(), "ffagent.conf") }
@@ -167,9 +183,14 @@ func fetchHealth(cfg *Config) (*Health, error) {
 }
 
 func statusCmd(args []string) error {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print raw JSON")
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q (paths with spaces need quotes)", fs.Arg(0))
+	}
 
 	cfg, err := effectiveConfig()
 	if err != nil {
@@ -195,7 +216,17 @@ func printHealth(h *Health) {
 	}
 	fmt.Printf("Agent:       %s, up %s\n", h.AgentVersion, (time.Duration(h.UptimeS) * time.Second).String())
 	ff := h.FFmpeg
-	fmt.Printf("ffmpeg:      %s (Jellyfin image ships %s, in sync: %v)\n", orNone(ff.Version), orNone(ff.Expected), ff.InSync)
+	switch {
+	case ff.Expected == "":
+		fmt.Printf("ffmpeg:      %s (Jellyfin's version: not reported yet, Jellyfin hasn't connected)\n", orNone(ff.Version))
+	case ff.InSync:
+		fmt.Printf("ffmpeg:      %s (same as Jellyfin's image)\n", orNone(ff.Version))
+	default:
+		fmt.Printf("ffmpeg:      %s (Jellyfin's image has %s, NOT in sync)\n", orNone(ff.Version), ff.Expected)
+	}
+	if ff.Download != nil {
+		fmt.Printf("  update:    %s\n", describeDownload(ff.Download))
+	}
 	if ff.LastSyncError != "" {
 		fmt.Printf("  sync error: %s\n", ff.LastSyncError)
 	}
@@ -244,4 +275,67 @@ func (r *rotatingFile) Write(p []byte) (int, error) {
 	}
 	defer f.Close()
 	return f.Write(p)
+}
+
+// describeDownload formats install progress for status and install output.
+func describeDownload(d *DownloadStatus) string {
+	switch d.Phase {
+	case "downloading":
+		const mb = 1 << 20
+		if d.Total > 0 {
+			return fmt.Sprintf("downloading jellyfin-ffmpeg %s: %d / %d MB (%d%%)",
+				d.Version, d.Bytes/mb, d.Total/mb, d.Bytes*100/d.Total)
+		}
+		return fmt.Sprintf("downloading jellyfin-ffmpeg %s: %d MB", d.Version, d.Bytes/mb)
+	case "unpacking":
+		return "unpacking jellyfin-ffmpeg " + d.Version + " ..."
+	case "testing":
+		return "testing the GPU with jellyfin-ffmpeg " + d.Version + " ..."
+	}
+	return d.Phase + " " + d.Version
+}
+
+// waitForReady follows the agent's first start: the jellyfin-ffmpeg download
+// and the GPU self-test. It returns the last health report (nil if the agent
+// never answered).
+func waitForReady(cfg *Config) *Health { return waitForReadyWithin(cfg, 15*time.Minute, time.Second) }
+
+func waitForReadyWithin(cfg *Config, limit, interval time.Duration) *Health {
+	fmt.Println()
+	fmt.Println("Getting ready (jellyfin-ffmpeg download and GPU test):")
+	show := func(s string) { fmt.Printf("\r  %-72s", s) }
+	deadline := time.Now().Add(limit)
+	var h *Health
+	for time.Now().Before(deadline) {
+		cur, err := fetchHealth(cfg)
+		if err == nil {
+			h = cur
+		}
+		ff := FFmpegStatus{}
+		if h != nil {
+			ff = h.FFmpeg
+		}
+		switch {
+		case err != nil:
+			show("starting the agent ...")
+		case ff.Download != nil:
+			show(describeDownload(ff.Download))
+		case ff.Path == "" && ff.LastSyncError != "" && !ff.Syncing:
+			show("jellyfin-ffmpeg could not be installed (see below)")
+			fmt.Println()
+			return h
+		case ff.Path == "":
+			show("looking up the jellyfin-ffmpeg release ...")
+		case cfg.GPU != GPUNone && h.Selftest.LastRun == nil:
+			show("testing the GPU ...")
+		default:
+			show("ready")
+			fmt.Println()
+			return h
+		}
+		time.Sleep(interval)
+	}
+	fmt.Println()
+	fmt.Printf("  still not ready after %s; follow along with:  ffagent status\n", limit)
+	return h
 }

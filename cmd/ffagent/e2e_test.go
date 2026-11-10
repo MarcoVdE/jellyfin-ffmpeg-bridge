@@ -243,3 +243,27 @@ func TestE2EPassThroughProfile(t *testing.T) {
 		t.Fatalf("none profile must not inject vaapi: %q", out)
 	}
 }
+
+// The installer's wait loop follows a real agent through its first start:
+// release lookup, download, unpack, GPU test, ready.
+func TestWaitForReadyFollowsFirstStart(t *testing.T) {
+	g := newFakeGitHub(t, "8.1.3-2")
+	dir := t.TempDir()
+	cfg := &Config{Token: newToken(), GPU: GPUIntel}
+	cfg.applyDefaults()
+	a := NewAgent(cfg, dir, log.New(io.Discard, "", 0))
+	a.ff.api = g.srv.URL
+	a.ff.selftest = func(context.Context, string) error { time.Sleep(300 * time.Millisecond); return nil }
+
+	jobLn, _ := net.Listen("tcp", "127.0.0.1:0")
+	healthLn, _ := net.Listen("tcp", "127.0.0.1:0")
+	cfg.HealthListen = healthLn.Addr().String()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = a.Serve(ctx, jobLn, healthLn) }()
+
+	h := waitForReadyWithin(cfg, 10*time.Second, 50*time.Millisecond)
+	if h == nil || h.FFmpeg.Version != "8.1.3-2" || h.Selftest.LastRun == nil || !h.Selftest.OK || h.Status != "ok" {
+		t.Fatalf("not ready: %+v", h)
+	}
+}

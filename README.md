@@ -227,6 +227,10 @@ cd $HOME\Downloads
 .\ffagent.exe install --compose C:\docker\jellyfin\docker-compose.yml
 ```
 
+Using Windows `sudo` instead also works (`sudo .\ffagent.exe install --compose ...`).
+In sudo's default "new window" mode, ffagent keeps that window open until you
+press Enter, so you can read the output.
+
 For an NVIDIA GPU add `--gpu nvidia`. This:
 
 - reads the volumes of the `jellyfin` service from your compose file and

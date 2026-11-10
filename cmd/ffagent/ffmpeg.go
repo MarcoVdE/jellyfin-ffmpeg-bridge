@@ -50,6 +50,7 @@ type FFmpeg struct {
 	lastSyncErr error
 	failedFor   string
 	failedAt    time.Time
+	progress    *DownloadStatus
 }
 
 // NewFFmpeg creates the manager. gpu and device select the self-test.
@@ -184,6 +185,7 @@ func (f *FFmpeg) sync(target string, done chan struct{}) {
 		_ = os.WriteFile(f.currentFile(), []byte(ver), 0o644)
 		f.log.Printf("now using jellyfin-ffmpeg %s", ver)
 	}
+	f.progress = nil
 	f.syncing = nil
 	f.mu.Unlock()
 	close(done)
@@ -282,9 +284,11 @@ func (f *FFmpeg) install(ctx context.Context, target string) (string, string, er
 		}
 		zipPath := filepath.Join(f.dir, asset.Name+".download")
 		defer os.Remove(zipPath)
-		if err := f.download(ctx, asset.URL, zipPath); err != nil {
+		f.setProgress(ver, "downloading", 0, asset.Size)
+		if err := f.download(ctx, asset.URL, zipPath, func(n, total int64) { f.setProgress(ver, "downloading", n, total) }); err != nil {
 			return "", "", fmt.Errorf("download %s: %w", asset.Name, err)
 		}
+		f.setProgress(ver, "unpacking", 0, 0)
 		partial := dest + ".partial"
 		_ = os.RemoveAll(partial)
 		found, err := unzip(zipPath, partial)
@@ -300,6 +304,7 @@ func (f *FFmpeg) install(ctx context.Context, target string) (string, string, er
 		_ = os.RemoveAll(partial)
 	}
 
+	f.setProgress(ver, "testing", 0, 0)
 	tctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	err = f.selftest(tctx, exe)
@@ -312,7 +317,14 @@ func (f *FFmpeg) install(ctx context.Context, target string) (string, string, er
 	return ver, exe, nil
 }
 
-func (f *FFmpeg) download(ctx context.Context, url, to string) error {
+// setProgress publishes install progress for /health (and `ffagent install`).
+func (f *FFmpeg) setProgress(ver, phase string, n, total int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.progress = &DownloadStatus{Version: ver, Phase: phase, Bytes: n, Total: total}
+}
+
+func (f *FFmpeg) download(ctx context.Context, url, to string, progress func(n, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -330,11 +342,30 @@ func (f *FFmpeg) download(ctx context.Context, url, to string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	pw := &progressWriter{w: out, total: resp.ContentLength, report: progress}
+	if _, err := io.Copy(pw, resp.Body); err != nil {
 		out.Close()
 		return err
 	}
 	return out.Close()
+}
+
+// progressWriter reports bytes written at most every 256 KiB.
+type progressWriter struct {
+	w         io.Writer
+	n, total  int64
+	lastShown int64
+	report    func(n, total int64)
+}
+
+func (p *progressWriter) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	p.n += int64(n)
+	if p.report != nil && (p.n-p.lastShown >= 256<<10 || err != nil) {
+		p.lastShown = p.n
+		p.report(p.n, p.total)
+	}
+	return n, err
 }
 
 // unzip extracts archive into dir and returns the path of ffmpeg.exe.
@@ -441,6 +472,10 @@ func (f *FFmpeg) Status() FFmpegStatus {
 		Syncing:  f.syncing != nil,
 		Path:     f.currentExe,
 		LastSync: timePtr(f.lastSync),
+	}
+	if f.progress != nil {
+		p := *f.progress
+		s.Download = &p
 	}
 	if f.lastSyncErr != nil {
 		s.LastSyncError = f.lastSyncErr.Error()

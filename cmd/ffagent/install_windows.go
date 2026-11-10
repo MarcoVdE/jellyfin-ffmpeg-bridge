@@ -25,11 +25,16 @@ const (
 func installedExe() string { return filepath.Join(dataDir(), "ffagent.exe") }
 
 func installCmd(args []string) error {
-	fs := flag.NewFlagSet("install", flag.ExitOnError)
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	composeFile := fs.String("compose", "", "docker-compose.yml of the Jellyfin container")
 	service := fs.String("service", "jellyfin", "name of the Jellyfin service in the compose file")
 	gpu := fs.String("gpu", "", "GPU on this machine: intel or nvidia (default: keep current, or intel)")
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q (paths with spaces need quotes)", fs.Arg(0))
+	}
 
 	if !isAdmin() {
 		return fmt.Errorf("run this from an Administrator terminal (right-click Terminal > Run as administrator)")
@@ -116,21 +121,12 @@ func installCmd(args []string) error {
 		fmt.Printf("  %-12s -> %s\n", p.Container, p.Host)
 	}
 
-	var h *Health
-	for i := 0; i < 20; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if h, err = fetchHealth(cfg); err == nil {
-			break
-		}
-	}
+	h := waitForReady(cfg)
+	fmt.Println()
 	if h == nil {
-		fmt.Println("\nThe agent did not respond yet. Check", logPath())
+		fmt.Println("The agent did not respond. Check", logPath())
 	} else {
-		for _, p := range h.Paths {
-			if !p.OK {
-				fmt.Printf("\n  problem with %s: %s\n", p.Container, p.Error)
-			}
-		}
+		printHealth(h)
 	}
 
 	fmt.Println()
@@ -139,10 +135,14 @@ func installCmd(args []string) error {
 		for _, n := range composeNotes {
 			fmt.Println("  " + n)
 		}
+		up := "docker compose up -d"
+		if exe, err := os.Executable(); err == nil && repoBuildContext(filepath.Dir(exe), filepath.Dir(mustAbs(*composeFile))) != "" {
+			up += " --build" // the override builds the shim image from this clone
+		}
 		fmt.Println()
 		fmt.Println("Next, in", filepath.Dir(mustAbs(*composeFile))+":")
 		fmt.Println()
-		fmt.Println("  docker compose up -d --build")
+		fmt.Println("  " + up)
 	} else {
 		if isNew {
 			fmt.Println("Next: add this line to the .env file next to your docker-compose.yml:")
@@ -160,7 +160,6 @@ func installCmd(args []string) error {
 	default:
 		fmt.Println("Then set the Jellyfin transcoding options listed in the README (Intel QuickSync).")
 	}
-	fmt.Println("jellyfin-ffmpeg is downloaded automatically. Check progress with:  ffagent status")
 	return nil
 }
 

@@ -221,3 +221,29 @@ func TestLiveGitHubRelease(t *testing.T) {
 		t.Fatalf("prefix lookup %q: %q %v", base, v, err)
 	}
 }
+
+func TestInstallReportsProgress(t *testing.T) {
+	g := newFakeGitHub(t, "8.1.3-2")
+	f := newTestFFmpeg(t, g, t.TempDir())
+	var phases []string
+	f.selftest = func(context.Context, string) error {
+		phases = append(phases, f.Status().Download.Phase)
+		return nil
+	}
+	if _, _, err := f.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(phases) != 1 || phases[0] != "testing" {
+		t.Fatalf("phase during self-test: %v", phases)
+	}
+	if f.Status().Download != nil {
+		t.Fatal("progress must be cleared after the install")
+	}
+}
+
+func TestDescribeDownload(t *testing.T) {
+	got := describeDownload(&DownloadStatus{Version: "8.1.3-2", Phase: "downloading", Bytes: 45 << 20, Total: 90 << 20})
+	if got != "downloading jellyfin-ffmpeg 8.1.3-2: 45 / 90 MB (50%)" {
+		t.Fatalf("got %q", got)
+	}
+}

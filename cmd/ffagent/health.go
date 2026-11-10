@@ -70,14 +70,23 @@ type PathStatus struct {
 
 // FFmpegStatus is filled in by the ffmpeg manager.
 type FFmpegStatus struct {
-	Version       string     `json:"version"`
-	Expected      string     `json:"expected"`
-	InSync        bool       `json:"in_sync"`
-	Managed       bool       `json:"managed"`
-	Syncing       bool       `json:"syncing"`
-	Path          string     `json:"path"`
-	LastSync      *time.Time `json:"last_sync"`
-	LastSyncError string     `json:"last_sync_error"`
+	Version       string          `json:"version"`
+	Expected      string          `json:"expected"`
+	InSync        bool            `json:"in_sync"`
+	Managed       bool            `json:"managed"`
+	Syncing       bool            `json:"syncing"`
+	Path          string          `json:"path"`
+	LastSync      *time.Time      `json:"last_sync"`
+	LastSyncError string          `json:"last_sync_error"`
+	Download      *DownloadStatus `json:"download,omitempty"`
+}
+
+// DownloadStatus shows a jellyfin-ffmpeg install in progress.
+type DownloadStatus struct {
+	Version string `json:"version"`
+	Phase   string `json:"phase"` // "downloading", "unpacking" or "testing"
+	Bytes   int64  `json:"bytes"`
+	Total   int64  `json:"total"`
 }
 
 // SelftestStatus is the result of the periodic GPU self-test.

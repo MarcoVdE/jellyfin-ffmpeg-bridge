@@ -226,3 +226,18 @@ func connectShares(creds []Credential) map[string]error {
 // mirrorRoot is the drive root container paths are mirrored under, e.g. C:\.
 // ffmpeg resolves "/media6/x.mkv" against the drive of its working directory.
 func mirrorRoot(cfg *Config) string { return cfg.Drive + `\` }
+
+var procGetConsoleProcessList = kernel32.NewProc("GetConsoleProcessList")
+
+// pauseIfOwnConsole waits for Enter when this process is the only one attached
+// to its console, i.e. Windows opened a window just for it and would close it
+// (with all output) the moment we exit.
+func pauseIfOwnConsole() {
+	var pids [2]uint32
+	n, _, _ := procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&pids[0])), uintptr(len(pids)))
+	if n != 1 {
+		return // shared with a shell (or no console): output stays visible
+	}
+	fmt.Print("\nPress Enter to close this window...")
+	_, _ = fmt.Scanln()
+}
