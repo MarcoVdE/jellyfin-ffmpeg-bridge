@@ -227,7 +227,10 @@ func (a *Agent) runJob(r io.Reader, w *proto.Writer, h proto.HelloMsg) {
 	}
 
 	if isInfoCommand(res.Args) {
-		ir := a.info.get(exe, res.Args)
+		ir, took := a.info.get(exe, res.Args)
+		if took > 0 {
+			a.log.Printf("info %s: ran ffmpeg in %s, answered from memory from now on", summarizeArgs(res.Args), took.Round(time.Millisecond))
+		}
 		if ir.err != nil {
 			a.state.JobError(a.now(), "start ffmpeg: "+ir.err.Error())
 			_ = w.Send(proto.Error, []byte("ffagent: start ffmpeg: "+ir.err.Error()))
@@ -356,8 +359,10 @@ func (a *Agent) warmInfo() {
 	if exe == "" {
 		return
 	}
-	for _, args := range [][]string{{"-version"}, {"-hwaccels"}} {
-		a.info.get(exe, args)
+	for _, args := range warmInfoCommands {
+		if _, took := a.info.get(exe, args); took > 0 {
+			a.log.Printf("info %s: pre-ran ffmpeg in %s", summarizeArgs(args), took.Round(time.Millisecond))
+		}
 	}
 }
 

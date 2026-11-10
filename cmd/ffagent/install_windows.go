@@ -247,7 +247,7 @@ func installCmd(args []string) error {
 	if self, err := os.Executable(); err == nil && !samePath(self, exe) {
 		exitHooks = append(exitHooks, func() { deleteAfterExit(self, "") })
 		fmt.Println()
-		fmt.Println("Removed the installer", self)
+		fmt.Println("Removing the installer", self, "when this window closes")
 		fmt.Println("(an identical copy is installed; from now on use", exe+")")
 	}
 	return nil
@@ -406,12 +406,14 @@ func uninstallCmd() error {
 // deleteAfterExit removes the running exe, and dir when given and then empty,
 // a few seconds after this process has exited (a running exe is locked).
 func deleteAfterExit(exe, dir string) {
-	script := fmt.Sprintf(`ping -n 4 127.0.0.1 >nul & del /f /q "%s"`, exe)
-	if dir != "" {
-		script += fmt.Sprintf(` & rmdir "%s"`, dir)
+	cmd := exec.Command("cmd")
+	// The command line must reach cmd.exe verbatim: Go would escape the inner
+	// quotes as \" (which cmd.exe doesn't understand) if passed as arguments.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
+		CmdLine:       deleteLaterCmdLine(exe, dir),
 	}
-	cmd := exec.Command("cmd", "/c", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	_ = cmd.Start()
 }
 

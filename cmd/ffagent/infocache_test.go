@@ -49,7 +49,7 @@ func TestInfoCacheRunsOncePerExeAndRetriesFailures(t *testing.T) {
 	if runs.Load() != 1 {
 		t.Fatalf("concurrent gets ran %d times", runs.Load())
 	}
-	if string(c.get("b.exe", []string{"-version"}).stdout) != "b.exe" || runs.Load() != 2 {
+	if r, _ := c.get("b.exe", []string{"-version"}); string(r.stdout) != "b.exe" || runs.Load() != 2 {
 		t.Fatal("a different ffmpeg must be asked separately")
 	}
 	fail.Store(true)
@@ -57,5 +57,30 @@ func TestInfoCacheRunsOncePerExeAndRetriesFailures(t *testing.T) {
 	c.get("c.exe", []string{"-version"})
 	if runs.Load() != 4 {
 		t.Fatalf("failures must not be cached, runs=%d", runs.Load())
+	}
+}
+
+func TestWarmCommandsAreInfoCommands(t *testing.T) {
+	for _, a := range warmInfoCommands {
+		if !isInfoCommand(a) {
+			t.Errorf("%q is pre-run but would never be answered from the cache", a)
+		}
+	}
+	// What Intro Skipper sends (see FFmpegService.Requirements upstream).
+	for _, a := range [][]string{{"-muxers"}, {"-h", "muxer=chromaprint"}, {"-h", "filter=silencedetect"}} {
+		if !isInfoCommand(a) {
+			t.Errorf("%q not cacheable", a)
+		}
+	}
+}
+
+func TestInfoCacheReportsRunTime(t *testing.T) {
+	c := newInfoCache()
+	c.run = func(context.Context, string, []string) infoResult { return infoResult{} }
+	if _, took := c.get("x", []string{"-version"}); took <= 0 {
+		t.Fatal("first call ran ffmpeg, took must be > 0")
+	}
+	if _, took := c.get("x", []string{"-version"}); took != 0 {
+		t.Fatal("second call is from memory, took must be 0")
 	}
 }

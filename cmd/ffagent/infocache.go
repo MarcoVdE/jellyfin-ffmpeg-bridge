@@ -76,8 +76,9 @@ func newInfoCache() *infoCache {
 	return &infoCache{entries: map[string]*infoEntry{}, run: runInfoCommand}
 }
 
-// get returns the (possibly cached) output. Failed runs are not kept.
-func (c *infoCache) get(exe string, args []string) infoResult {
+// get returns the (possibly cached) output, and how long ffmpeg ran if this
+// call ran it (0 when answered from memory). Failed runs are not kept.
+func (c *infoCache) get(exe string, args []string) (infoResult, time.Duration) {
 	key := exe + "\x00" + strings.Join(args, "\x00")
 	c.mu.Lock()
 	e := c.entries[key]
@@ -87,10 +88,13 @@ func (c *infoCache) get(exe string, args []string) infoResult {
 	}
 	c.mu.Unlock()
 
+	var took time.Duration
 	e.once.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
+		start := time.Now()
 		e.res = c.run(ctx, exe, args)
+		took = time.Since(start)
 	})
 	if e.res.err != nil || e.res.code != 0 {
 		c.mu.Lock()
@@ -99,7 +103,7 @@ func (c *infoCache) get(exe string, args []string) infoResult {
 		}
 		c.mu.Unlock()
 	}
-	return e.res
+	return e.res, took
 }
 
 func runInfoCommand(ctx context.Context, exe string, args []string) infoResult {
@@ -115,4 +119,14 @@ func runInfoCommand(ctx context.Context, exe string, args []string) infoResult {
 	}
 	res.err = err
 	return res
+}
+
+// warmInfoCommands are pre-run when ffmpeg becomes ready: what Jellyfin asks
+// first, and the checks of the Intro Skipper plugin, which allows only 2 s.
+var warmInfoCommands = [][]string{
+	{"-version"},
+	{"-hwaccels"},
+	{"-muxers"},
+	{"-h", "muxer=chromaprint"},
+	{"-h", "filter=silencedetect"},
 }
