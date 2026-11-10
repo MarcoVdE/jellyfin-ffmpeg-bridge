@@ -1,0 +1,63 @@
+# Runs the ffmpeg agent on a Linux machine with a GPU, for a Jellyfin that runs
+# on another machine. See docs/linux-agent.md.
+#
+# The agent runs inside the official Jellyfin image, so ffmpeg, its version and
+# the GPU drivers are exactly what Jellyfin itself would use, and Watchtower
+# updates them together with your Jellyfin.
+#
+# Expects:
+#   - this repository cloned next to this file as ./jellyfin-ffmpeg-bridge
+#   - FFSHIM_TOKEN=... in the .env file next to this file (same value as on
+#     the Jellyfin machine)
+
+services:
+  # One-shot: copies the agent binary into the "ffshim" volume, then exits.
+  ffshim:
+    build: ./jellyfin-ffmpeg-bridge
+    image: jellyfin-ffshim:local
+    volumes:
+      - ffshim:/out
+    restart: "no"
+    labels:
+      com.centurylinkapps.watchtower.enable: "false"
+
+  ffagent:
+    image: jellyfin/jellyfin            # use the same tag as your Jellyfin
+    container_name: ffagent
+    entrypoint: ["/opt/ffshim/ffagent", "run"]
+    init: true
+    depends_on:
+      ffshim:
+        condition: service_completed_successfully
+    environment:
+      FFAGENT_TOKEN: ${FFSHIM_TOKEN:?Set FFSHIM_TOKEN in .env}
+      FFAGENT_GPU: intel                # intel | vaapi (AMD) | nvidia | none
+      # FFAGENT_DEVICE: /dev/dri/renderD128
+      # For NVIDIA, also uncomment:
+      # NVIDIA_VISIBLE_DEVICES: all
+      # NVIDIA_DRIVER_CAPABILITIES: all
+    ports:
+      - 7878:7878                       # jobs from the Jellyfin machine
+      - 7879:7879                       # /health for monitoring
+    # Intel or AMD:
+    devices:
+      - /dev/dri:/dev/dri
+    # NVIDIA instead (needs the NVIDIA Container Toolkit): remove "devices"
+    # above, uncomment the NVIDIA_* variables and this line:
+    # runtime: nvidia
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:7879/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ffshim:/opt/ffshim:ro
+      # Every volume of your Jellyfin container, at the SAME container path.
+      # The host side is wherever this machine sees those folders (NFS/SMB):
+      - /mnt/jellyfin/cache:/cache
+      - /mnt/jellyfin/config:/config
+      - /mnt/nas/media:/media:ro
+    restart: unless-stopped
+
+volumes:
+  ffshim:

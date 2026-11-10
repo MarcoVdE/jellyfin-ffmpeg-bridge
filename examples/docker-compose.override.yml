@@ -1,0 +1,43 @@
+# Drop this file next to your existing docker-compose.yml.
+# `docker compose up -d` merges it automatically with the main file.
+#
+# Expects:
+#   - this repository cloned next to it as ./jellyfin-ffmpeg-bridge
+#   - FFSHIM_TOKEN=... in the .env file next to it (from `ffagent install`)
+#   - your Jellyfin service to be called "jellyfin" (rename below if not)
+
+services:
+  jellyfin:
+    environment:
+      JELLYFIN_FFMPEG: /opt/ffshim/ffmpeg
+      FFSHIM_TOKEN: ${FFSHIM_TOKEN:?Set FFSHIM_TOKEN in .env (run "ffagent token" on the agent machine)}
+      # Only change this if Jellyfin and the agent are on different machines:
+      # FFSHIM_AGENT: 192.168.1.50:7878
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ffshim:/opt/ffshim:ro
+    depends_on:
+      ffshim:
+        condition: service_completed_successfully
+    # Keeps Jellyfin's own check and adds a heartbeat through the shim, so the
+    # agent (and Home Assistant) notice when the container can't reach it.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/health >/dev/null && /opt/ffshim/ffmpeg -ffshim-ping"]
+      interval: 5m
+      timeout: 30s
+      start_period: 1m
+      retries: 3
+
+  # One-shot: copies the shim into the "ffshim" volume, then exits.
+  ffshim:
+    build: ./jellyfin-ffmpeg-bridge
+    image: jellyfin-ffshim:local
+    volumes:
+      - ffshim:/out
+    restart: "no"
+    labels:
+      com.centurylinkapps.watchtower.enable: "false"
+
+volumes:
+  ffshim:

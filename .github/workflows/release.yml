@@ -1,0 +1,66 @@
+name: release
+
+# Push a tag like v1.0.0 to publish ffagent.exe and the ffshim image.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build
+        run: |
+          V=${GITHUB_REF_NAME}
+          mkdir dist
+          IMG="ghcr.io/${GITHUB_REPOSITORY,,}:${V#v}"
+          AFLAGS="-s -w -X main.agentVersion=$V -X main.shimImage=$IMG"
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$AFLAGS" -o dist/ffagent.exe ./cmd/ffagent
+          GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="$AFLAGS" -o dist/ffagent-arm64.exe ./cmd/ffagent
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.shimVersion=$V" -o dist/ffshim-linux-amd64 ./cmd/ffshim
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.shimVersion=$V" -o dist/ffshim-linux-arm64 ./cmd/ffshim
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.agentVersion=$V" -o dist/ffagent-linux-amd64 ./cmd/ffagent
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.agentVersion=$V" -o dist/ffagent-linux-arm64 ./cmd/ffagent
+          (cd dist && sha256sum * > SHA256SUMS)
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

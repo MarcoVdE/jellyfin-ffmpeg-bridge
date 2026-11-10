@@ -1,0 +1,145 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// shimImage is set for release builds (-X main.shimImage=ghcr.io/...:1.2.3)
+// so users without a clone of the repository can pull the shim image.
+var shimImage = ""
+
+type overrideOpts struct {
+	Service string // compose service name of Jellyfin
+	Build   string // build context of this repository, relative to the compose folder
+	Image   string // prebuilt shim image (used when Build is empty)
+	Agent   string // FFSHIM_AGENT, empty = default host.docker.internal:7878
+}
+
+// renderOverride returns a docker-compose.override.yml that adds the shim to
+// an existing Jellyfin service. examples/docker-compose.override.yml is this
+// output for the defaults (enforced by a test).
+func renderOverride(o overrideOpts) string {
+	var b strings.Builder
+	w := func(s string) { b.WriteString(s + "\n") }
+	w("# Drop this file next to your existing docker-compose.yml.")
+	w("# `docker compose up -d` merges it automatically with the main file.")
+	w("#")
+	w("# Expects:")
+	if o.Build != "" {
+		w("#   - this repository cloned next to it as " + o.Build)
+	}
+	w("#   - FFSHIM_TOKEN=... in the .env file next to it (from `ffagent install`)")
+	w(fmt.Sprintf("#   - your Jellyfin service to be called %q (rename below if not)", o.Service))
+	w("")
+	w("services:")
+	w("  " + o.Service + ":")
+	w("    environment:")
+	w("      JELLYFIN_FFMPEG: /opt/ffshim/ffmpeg")
+	w(`      FFSHIM_TOKEN: ${FFSHIM_TOKEN:?Set FFSHIM_TOKEN in .env (run "ffagent token" on the agent machine)}`)
+	if o.Agent != "" {
+		w("      FFSHIM_AGENT: " + o.Agent)
+	} else {
+		w("      # Only change this if Jellyfin and the agent are on different machines:")
+		w("      # FFSHIM_AGENT: 192.168.1.50:7878")
+	}
+	w("    extra_hosts:")
+	w("      - host.docker.internal:host-gateway")
+	w("    volumes:")
+	w("      - ffshim:/opt/ffshim:ro")
+	w("    depends_on:")
+	w("      ffshim:")
+	w("        condition: service_completed_successfully")
+	w("    # Keeps Jellyfin's own check and adds a heartbeat through the shim, so the")
+	w("    # agent (and Home Assistant) notice when the container can't reach it.")
+	w("    healthcheck:")
+	w(`      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/health >/dev/null && /opt/ffshim/ffmpeg -ffshim-ping"]`)
+	w("      interval: 5m")
+	w("      timeout: 30s")
+	w("      start_period: 1m")
+	w("      retries: 3")
+	w("")
+	w("  # One-shot: copies the shim into the \"ffshim\" volume, then exits.")
+	w("  ffshim:")
+	if o.Build != "" {
+		w("    build: " + o.Build)
+		w("    image: jellyfin-ffshim:local")
+	} else {
+		w("    image: " + o.Image)
+	}
+	w("    volumes:")
+	w("      - ffshim:/out")
+	w(`    restart: "no"`)
+	w("    labels:")
+	w(`      com.centurylinkapps.watchtower.enable: "false"`)
+	w("")
+	w("volumes:")
+	w("  ffshim:")
+	return b.String()
+}
+
+// overridePath returns the override file docker compose loads automatically
+// for composeFile, or "" if the file name is not one compose auto-detects.
+func overridePath(composeFile string) string {
+	dir, base := filepath.Split(composeFile)
+	for _, name := range []string{"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"} {
+		if strings.EqualFold(base, name) {
+			ext := filepath.Ext(name)
+			return filepath.Join(dir, strings.TrimSuffix(name, ext)+".override"+ext)
+		}
+	}
+	return ""
+}
+
+// repoBuildContext returns the build context for the override if this exe
+// was built inside a clone of the repository, relative to composeDir.
+func repoBuildContext(exeDir, composeDir string) string {
+	if !fileExistsAt(filepath.Join(exeDir, "Dockerfile")) || !fileExistsAt(filepath.Join(exeDir, "cmd", "ffshim", "main.go")) {
+		return ""
+	}
+	rel, err := filepath.Rel(composeDir, exeDir)
+	if err != nil {
+		return filepath.ToSlash(exeDir)
+	}
+	rel = filepath.ToSlash(rel)
+	if !strings.HasPrefix(rel, ".") {
+		rel = "./" + rel
+	}
+	return rel
+}
+
+// setEnvVar sets KEY=value in a .env file, keeping all other lines.
+func setEnvVar(file, key, value string) error {
+	b, err := os.ReadFile(file)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	content := strings.TrimPrefix(string(b), "\ufeff")
+	nl := "\n"
+	if strings.Contains(content, "\r\n") {
+		nl = "\r\n"
+	}
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	found := false
+	for i, l := range lines {
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "export "))
+		if strings.HasPrefix(t, key+"=") {
+			lines[i] = key + "=" + value
+			found = true
+		}
+	}
+	if !found {
+		lines = append(lines, key+"="+value)
+	}
+	return os.WriteFile(file, []byte(strings.Join(lines, nl)+nl), 0o600)
+}
+
+func fileExistsAt(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
