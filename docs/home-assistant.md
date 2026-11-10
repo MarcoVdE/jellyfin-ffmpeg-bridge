@@ -149,7 +149,7 @@ ffmpeg download.
 
 | Jellyfin health | Likely cause                              | Fix                                                                                       |
 | --------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `Healthy`       | Agent stopped, or firewall changed        | Administrator terminal: `C:\ProgramData\ffagent\ffagent.exe restart`; check `ffagent.log` |
+| `Healthy`       | Agent stopped, or firewall changed        | Administrator terminal: `<compose folder>\ffagent\ffagent.exe restart`; check `ffagent.log` |
 | `unavailable`   | Windows machine or Docker Desktop is down | Check the machine                                                                         |
 
 ## 3. Optional: restart Jellyfin automatically

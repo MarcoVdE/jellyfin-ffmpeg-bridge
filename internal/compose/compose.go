@@ -217,3 +217,55 @@ func stripComment(s string) string {
 	}
 	return s
 }
+
+// FindJellyfinService returns the service to use: preferred if the file has
+// it, otherwise the only service running a Jellyfin image.
+func FindJellyfinService(content, preferred string) (string, error) {
+	lines := splitLines(content)
+	type svc struct{ name, image string }
+	var services []svc
+	inServices, servicesIndent, svcIndent := false, -1, -1
+	for _, l := range lines {
+		if !inServices {
+			if l.text == "services:" {
+				inServices, servicesIndent = true, l.indent
+			}
+			continue
+		}
+		if l.indent <= servicesIndent {
+			break
+		}
+		if svcIndent < 0 {
+			svcIndent = l.indent
+		}
+		if l.indent == svcIndent && strings.HasSuffix(l.text, ":") {
+			services = append(services, svc{name: unquote(strings.TrimSuffix(l.text, ":"))})
+			continue
+		}
+		if len(services) > 0 && l.indent > svcIndent && strings.HasPrefix(l.text, "image:") {
+			cur := &services[len(services)-1]
+			if cur.image == "" {
+				cur.image = unquote(strings.TrimPrefix(l.text, "image:"))
+			}
+		}
+	}
+	var matches []string
+	for _, s := range services {
+		if s.name == preferred {
+			return s.name, nil
+		}
+		img := strings.ToLower(s.image)
+		if strings.Contains(img, "jellyfin/jellyfin") || strings.Contains(img, "linuxserver/jellyfin") ||
+			strings.HasPrefix(img, "jellyfin:") || img == "jellyfin" {
+			matches = append(matches, s.name)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return "", fmt.Errorf("no service named %q and no service using a Jellyfin image", preferred)
+	default:
+		return "", fmt.Errorf("several Jellyfin services (%s); pick one with --service", strings.Join(matches, ", "))
+	}
+}

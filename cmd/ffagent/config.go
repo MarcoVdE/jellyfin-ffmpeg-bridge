@@ -32,6 +32,7 @@ type Config struct {
 	GPU          string // intel | nvidia | vaapi | none: selects the self-test
 	Translate    string // auto | none | qsv-windows
 	Device       string // render node for intel/vaapi on Linux
+	Compose      string // Windows: compose file this install was set up for (used by uninstall)
 	Paths        []PathMap
 	Credentials  []Credential
 }
@@ -197,6 +198,8 @@ func parseConfig(sc *bufio.Scanner) (*Config, error) {
 				c.Translate = v
 			case "device":
 				c.Device = v
+			case "compose":
+				c.Compose = v
 			default:
 				return nil, fmt.Errorf("line %d: unknown setting %q", n, k)
 			}
@@ -265,6 +268,11 @@ func (c *Config) Render() string {
 		w("# translate = auto")
 	}
 	w("")
+	if c.Compose != "" {
+		w("# Compose file this agent was installed for (uninstall cleans up next to it).")
+		w("compose = %s", c.Compose)
+		w("")
+	}
 	w("# Use a fixed ffmpeg.exe instead of the automatically synced jellyfin-ffmpeg.")
 	if c.FFmpeg != "" {
 		w("ffmpeg = %s", c.FFmpeg)

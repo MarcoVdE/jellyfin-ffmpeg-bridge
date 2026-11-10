@@ -192,9 +192,8 @@ with your folder.
 
 Download **`ffagent.exe`** from the
 [latest release](https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge/releases)
-(under *Assets*; `ffagent-arm64.exe` for Windows on ARM), for example to your
-Downloads folder. You don't need to keep it there: the install copies it to
-`C:\ProgramData\ffagent\`.
+(under *Assets*; `ffagent-arm64.exe` for Windows on ARM) and put it **in your
+Jellyfin compose folder**, next to `docker-compose.yml`.
 
 > Windows SmartScreen or Defender may warn about `ffagent.exe` because it isn't
 > signed. Each release lists `SHA256SUMS`; compare with
@@ -203,8 +202,9 @@ Downloads folder. You don't need to keep it there: the install copies it to
 <details><summary>Or build it from source</summary>
 
 Clone the repository **next to your compose file** and build with Docker (no Go
-install needed). Then run step 2 from the clone instead; the generated override
-file will build the shim image from the clone rather than pulling it.
+install needed). Then run step 2 with the `ffagent.exe` from the clone; the
+generated override file will build the shim image from the clone rather than
+pulling it.
 
 ```powershell
 cd C:\docker\jellyfin
@@ -212,6 +212,7 @@ git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
 cd jellyfin-ffmpeg-bridge
 docker run --rm -v "${PWD}:/src" -w /src -e CGO_ENABLED=0 -e GOOS=windows golang:1-alpine `
   go build -buildvcs=false -trimpath -o ffagent.exe ./cmd/ffagent
+.\ffagent.exe install --compose ..\docker-compose.yml
 ```
 
 In step 3, use `docker compose up -d --build`.
@@ -220,32 +221,47 @@ In step 3, use `docker compose up -d --build`.
 
 ### 2. Install the agent
 
-Open **Terminal as Administrator** (right-click Start → Terminal (Admin)):
+**Double-click `ffagent.exe`.** It finds the `docker-compose.yml` next to it,
+asks for administrator rights, and installs. The window shows the progress
+(jellyfin-ffmpeg download, GPU test) and stays open until you press Enter.
+
+<details><summary>From a terminal instead (and options)</summary>
 
 ```powershell
-cd $HOME\Downloads
 .\ffagent.exe install --compose C:\docker\jellyfin\docker-compose.yml
 ```
 
-Using Windows `sudo` instead also works (`sudo .\ffagent.exe install --compose ...`).
-In sudo's default "new window" mode, ffagent keeps that window open until you
-press Enter, so you can read the output.
+Options: `--gpu nvidia` for an NVIDIA GPU, `--service NAME` if the Jellyfin
+service has an unusual name and doesn't use a Jellyfin image, `--dir FOLDER` to
+install somewhere else (see the note on permissions below). Running it again
+updates the install and keeps the token and settings.
 
-For an NVIDIA GPU add `--gpu nvidia`. This:
+</details>
 
-- reads the volumes of the `jellyfin` service from your compose file and
-  mirrors them on `C:\` (use `--service name` if your service has another name);
-- creates `C:\ProgramData\ffagent\` with the config and a random token;
-- writes `FFSHIM_TOKEN=...` into the `.env` file next to your compose file;
+The install:
+
+- finds the Jellyfin service in your compose file (the service called
+  `jellyfin`, or the one running a Jellyfin image) and mirrors its volumes on
+  `C:\` as links, e.g. `C:\media6` → `D:\Videos\Movies`;
+- creates the folder **`ffagent\`** next to your compose file with the agent,
+  its config, the log, the downloaded ffmpeg, the token, and `uninstall.cmd`;
 - writes `docker-compose.override.yml` next to your compose file, using the
-  shim image of the same release. It never overwrites an existing override
-  file; if you already have one, it tells you what to do;
+  shim image of the same release and passing the token as a **compose
+  secret** (nothing is added to `.env`). It never overwrites an override file
+  you wrote yourself; if you have one, it tells you what to do;
 - registers a boot-time task that runs the agent as SYSTEM, restarts it if it
   crashes, and opens ports 7878/7879 in the firewall for your local network;
-- starts the agent, which downloads the matching jellyfin-ffmpeg (about 90 MB).
+- starts the agent and waits until it's ready.
 
 Check the output for path problems, for example a folder in your compose file
 that doesn't exist.
+
+> **Permissions:** the agent runs as SYSTEM, so the install makes its
+> `ffagent\` folder writable only by Administrators. Because your user owns the
+> compose folder around it, a program running as your user could still rename
+> that folder away. That doesn't matter on a typical single-user server where
+> you are the administrator anyway. To install in the fully protected
+> `C:\ProgramData\ffagent` instead, use `--dir C:\ProgramData\ffagent`.
 
 ### 3. Restart Jellyfin with the shim
 
@@ -294,7 +310,7 @@ Jellyfin machine. No restrictions apply, because nothing is translated.
 
 ### 5. Verify it works
 
-1. On Windows: `C:\ProgramData\ffagent\ffagent.exe status` should show
+1. On Windows: double-click `ffagent\ffagent.exe` (or run `ffagent.exe status`); it should show
    `Status: OK`, a jellyfin-ffmpeg version, `GPU test: OK` and every path `ok`.
 2. From the container:
     ```powershell
@@ -328,7 +344,7 @@ Jellyfin update.
 | **Jellyfin**                  | As before (Watchtower or `docker compose pull`).                                                                                                                                                                           |
 | **ffmpeg on a Windows agent** | Automatic: the agent notices the new jellyfin-ffmpeg version on the next connection and installs it before running the job. If that fails, the previous version keeps working and `/health` reports `version_sync_failed`. |
 | **ffmpeg on a Linux agent**   | Comes with the agent's Jellyfin image. Let Watchtower update it too (same tag as Jellyfin); `/health` reports `version_mismatch` until both match.                                                                         |
-| **This project**              | Download the new `ffagent.exe` and run `ffagent.exe install --compose C:\docker\jellyfin\docker-compose.yml` again (keeps your token and settings; it updates the image tag in the override file only if the file still contains the shim, otherwise see its output), then `docker compose up -d`.                                          |
+| **This project**              | Put the new `ffagent.exe` next to your compose file and double-click it (or run `install` again). It keeps the token and settings, rewrites the override file it generated (new shim image), then run `docker compose up -d`. |
 
 If Jellyfin was updated and started before the new ffmpeg was ready, `/health`
 reports `restart_jellyfin`; run `docker restart jellyfin`.
@@ -345,21 +361,23 @@ the Jellyfin container.
 
 ### `ffagent` commands
 
-On Windows run them from `C:\ProgramData\ffagent\` (install copies itself
-there). `install`, `uninstall` and `restart` are Windows-only and need an
-Administrator terminal.
+On Windows the installed copy is `ffagent\ffagent.exe` next to your compose
+file; any copy finds the install. `install`, `uninstall` and `restart` are
+Windows-only and ask for administrator rights themselves. Started without a
+command (double-click), ffagent installs for the `docker-compose.yml` next to
+it, or shows the status of the install.
 
 | Command                                                           | Does                                                                                                    |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `install [--compose FILE] [--service NAME] [--gpu intel\|nvidia]` | Install or update; see [step 2](#2-install-the-agent). Without `--compose` it keeps the existing paths. |
+| `install [--compose FILE] [--service NAME] [--gpu intel\|nvidia] [--dir FOLDER]` | Install or update; see [step 2](#2-install-the-agent). Without `--compose` it keeps the existing paths. |
 | `status [--json]`                                                 | Show health: versions, GPU test, paths, jobs, last error.                                               |
-| `token`                                                           | Print the token for `FFSHIM_TOKEN`.                                                                     |
+| `token`                                                           | Print the token (for manual setups: `FFSHIM_TOKEN`).                                                                     |
 | `selftest`                                                        | Run the GPU self-test with the installed ffmpeg.                                                        |
 | `restart`                                                         | Restart the agent (after editing the config).                                                           |
-| `uninstall`                                                       | Remove the task, firewall rule and links. Keeps `C:\ProgramData\ffagent`.                               |
+| `uninstall`                                                       | Remove everything ffagent added; see [Uninstalling](#uninstalling). Same as `uninstall.cmd`.                               |
 | `run`                                                             | Run in the foreground (what the Windows task and the Linux container run).                              |
 
-### Config file: `C:\ProgramData\ffagent\ffagent.conf`
+### Config file: `ffagent\ffagent.conf`
 
 Generated by `install`. Edit it with Notepad, then run `ffagent restart`.
 
@@ -405,14 +423,14 @@ container is configured; no config file is needed there.
 | `FFAGENT_DEVICE`                          | `device`                                                                            |
 | `FFAGENT_LISTEN`, `FFAGENT_HEALTH_LISTEN` | `listen`, `health_listen`                                                           |
 | `FFAGENT_DRIVE`                           | `drive`                                                                             |
-| `FFAGENT_HOME`                            | data folder (default `C:\ProgramData\ffagent`, or `/var/lib/ffagent` on Linux)      |
+| `FFAGENT_HOME`                            | data folder (default: the install folder, or `/var/lib/ffagent` on Linux)      |
 
 ### Shim environment variables (Jellyfin container)
 
 | Variable                | Default                     |                                                                              |
 | ----------------------- | --------------------------- | ---------------------------------------------------------------------------- |
 | `JELLYFIN_FFMPEG`       |                             | Must be `/opt/ffshim/ffmpeg` (set by the override file).                     |
-| `FFSHIM_TOKEN`          |                             | Required. From `.env`.                                                       |
+| `FFSHIM_TOKEN`          |                             | The token. Optional when the compose secret `ffshim_token` (or `FFSHIM_TOKEN_FILE`) is used, as `install` sets up. |
 | `FFSHIM_AGENT`          | `host.docker.internal:7878` | Agent address; `<ip>:7878` for another machine.                              |
 | `FFSHIM_FFMPEG_VERSION` | detected                    | Override the detected jellyfin-ffmpeg version; `none` disables version sync. |
 
@@ -427,22 +445,38 @@ container is configured; no config file is needed there.
 
 | Path                                       |                                         |
 | ------------------------------------------ | --------------------------------------- |
-| `C:\ProgramData\ffagent\ffagent.exe`       | the agent                               |
-| `C:\ProgramData\ffagent\ffagent.conf`      | config (contains the token)             |
-| `C:\ProgramData\ffagent\ffagent.log`       | log (rotated at 10 MB)                  |
-| `C:\ProgramData\ffagent\ffmpeg\<version>\` | downloaded jellyfin-ffmpeg builds       |
+| `<compose folder>\ffagent\ffagent.exe` | the agent |
+| `<compose folder>\ffagent\ffagent.conf` | config (contains the token) |
+| `<compose folder>\ffagent\ffshim-token` | the token, passed to Jellyfin as a compose secret |
+| `<compose folder>\ffagent\ffagent.log` | log (rotated at 10 MB) |
+| `<compose folder>\ffagent\ffmpeg\<version>\` | downloaded jellyfin-ffmpeg builds |
+| `<compose folder>\ffagent\uninstall.cmd` | removes everything ffagent added |
+| `<compose folder>\docker-compose.override.yml` | adds the shim to Jellyfin (generated) |
+| `C:\ProgramData\ffagent\install-dir.txt` | where the install is, for `ffagent` copies elsewhere |
 | `C:\<container path>`                      | links to your folders, e.g. `C:\media6` |
 
 ---
 
 ## Uninstalling
 
-1. Delete `docker-compose.override.yml` (or remove the shim parts from it), remove
-   `FFSHIM_TOKEN` from `.env`, and run `docker compose up -d`.
-2. In Jellyfin, switch hardware acceleration off (or back to what you used before).
-3. Windows: in an Administrator terminal run
-   `C:\ProgramData\ffagent\ffagent.exe uninstall`, then delete `C:\ProgramData\ffagent`.
-   Linux: `docker compose down` in the agent's folder.
+**Windows:** double-click **`ffagent\uninstall.cmd`** next to your compose file. It
+removes only what ffagent added, and prints what's left for you:
+
+- the boot task, the firewall rule, and the `C:\` links (only links that still
+  point where ffagent created them; real folders are never touched);
+- the `ffagent\` folder (agent, config, log, token, downloaded ffmpeg);
+- the `docker-compose.override.yml` it generated (an override you edited by
+  hand is left alone; you're told to remove the shim parts yourself), and an
+  `FFSHIM_TOKEN` line in `.env` from older versions.
+
+Then:
+
+1. Run `docker compose up -d --remove-orphans` in the compose folder, so Jellyfin
+   goes back to its own ffmpeg.
+2. In Jellyfin, switch hardware acceleration back to what you used before.
+
+**Linux agent:** `docker compose down` in the agent's folder, and remove the
+shim from Jellyfin's override file.
 
 ---
 
@@ -464,7 +498,7 @@ internal/proto/      wire protocol (framing, HMAC challenge)
 internal/translate/  translation profiles (none, qsv-windows)
 internal/version/    jellyfin-ffmpeg version parsing
 internal/compose/    reads volumes from docker-compose.yml
-examples/            override file, .env example, Linux agent compose file
+examples/            override file, .env example (manual setups), Linux agent compose file
 docs/                separate machines, Linux agent, Home Assistant, troubleshooting
 ```
 

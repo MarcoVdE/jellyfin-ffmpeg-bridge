@@ -43,6 +43,13 @@ Commands:
   version    Print the version
 `
 
+var (
+	// skipPause is set when another window takes over (after elevating).
+	skipPause bool
+	// exitHooks run right before the process exits (e.g. self-delete on uninstall).
+	exitHooks []func()
+)
+
 func main() {
 	cmd := ""
 	if len(os.Args) > 1 {
@@ -52,8 +59,11 @@ func main() {
 	// Started in a console window of its own (double-click, or Windows sudo
 	// in "new window" mode)? Keep it open so the output can be read. Never
 	// for "run": the boot task must exit (and be restarted) without waiting.
-	if cmd != "run" {
+	if cmd != "run" && !skipPause {
 		pauseIfOwnConsole()
+	}
+	for _, f := range exitHooks {
+		f()
 	}
 	os.Exit(code)
 }
@@ -77,7 +87,9 @@ func dispatch(cmd string, args []string) int {
 		err = selftestCmd()
 	case "version", "-version", "--version":
 		fmt.Println("ffagent", agentVersion)
-	case "", "help", "-h", "--help", "/?":
+	case "":
+		return noArgs()
+	case "help", "-h", "--help", "/?":
 		fmt.Printf(usageText, agentVersion, dataDir())
 	default:
 		fmt.Fprintf(os.Stderr, "ffagent: unknown command %q\n", cmd)

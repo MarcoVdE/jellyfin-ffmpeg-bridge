@@ -1,4 +1,4 @@
-# Drop this file next to your existing docker-compose.yml.
+# Example: copy this file next to your existing docker-compose.yml.
 # `docker compose up -d` merges it automatically with the main file.
 #
 # Expects:

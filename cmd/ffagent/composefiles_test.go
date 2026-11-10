@@ -97,3 +97,84 @@ func TestGeneratedOverrideCarriesMarker(t *testing.T) {
 		t.Fatalf("missing marker:\n%s", got)
 	}
 }
+
+func TestRemoveEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, ".env")
+	os.WriteFile(f, []byte("TZ=Europe/Amsterdam\r\nFFSHIM_TOKEN=abc\r\n"), 0o644)
+	if ok, err := removeEnvVar(f, "FFSHIM_TOKEN"); !ok || err != nil {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if b, _ := os.ReadFile(f); string(b) != "TZ=Europe/Amsterdam\r\n" {
+		t.Fatalf("got %q", b)
+	}
+	if ok, _ := removeEnvVar(f, "FFSHIM_TOKEN"); ok {
+		t.Fatal("nothing left to remove")
+	}
+	// A .env holding only our line is deleted entirely.
+	g := filepath.Join(dir, "only.env")
+	os.WriteFile(g, []byte("FFSHIM_TOKEN=abc\n"), 0o644)
+	if ok, err := removeEnvVar(g, "FFSHIM_TOKEN"); !ok || err != nil || fileExistsAt(g) {
+		t.Fatalf("expected file removed: %v %v", ok, err)
+	}
+	if ok, err := removeEnvVar(filepath.Join(dir, "missing.env"), "X"); ok || err != nil {
+		t.Fatalf("missing file: %v %v", ok, err)
+	}
+}
+
+func TestFindComposeFileAndGeneratedOverride(t *testing.T) {
+	dir := t.TempDir()
+	if findComposeFile(dir) != "" {
+		t.Fatal("empty dir")
+	}
+	os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services: {}\n"), 0o644)
+	if got := findComposeFile(dir); filepath.Base(got) != "docker-compose.yml" {
+		t.Fatalf("got %q", got)
+	}
+	gen := filepath.Join(dir, "docker-compose.override.yml")
+	os.WriteFile(gen, []byte(renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage, Generated: true})), 0o644)
+	hand := filepath.Join(dir, "hand.yml")
+	os.WriteFile(hand, []byte(renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage})), 0o644)
+	if !isGeneratedOverride(gen) || isGeneratedOverride(hand) || isGeneratedOverride(filepath.Join(dir, "nope")) {
+		t.Fatal("isGeneratedOverride wrong")
+	}
+}
+
+func TestOverrideWithTokenSecret(t *testing.T) {
+	got := renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage, Generated: true, TokenFile: "./ffagent/ffshim-token"})
+	for _, s := range []string{"    secrets:\n      - ffshim_token\n", "secrets:\n  ffshim_token:\n    file: ./ffagent/ffshim-token\n"} {
+		if !strings.Contains(got, s) {
+			t.Errorf("missing %q in:\n%s", s, got)
+		}
+	}
+	if strings.Contains(got, "FFSHIM_TOKEN:") || strings.Contains(got, ".env") {
+		t.Errorf("secret mode must not use the environment/.env:\n%s", got)
+	}
+}
+
+func TestComposeRelPath(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "jellyfin")
+	if got := composeRelPath(base, filepath.Join(base, "ffagent", "ffshim-token")); got != "./ffagent/ffshim-token" {
+		t.Fatalf("got %q", got)
+	}
+	outside := filepath.Join(filepath.Dir(base), "elsewhere", "ffshim-token")
+	if got := composeRelPath(base, outside); got != outside {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestLegacyGeneratedOverrideIsRecognised(t *testing.T) {
+	dir := t.TempDir()
+	// What v1.0.0-alpha.2..4 wrote: no marker, env token, legacy first line.
+	legacy := filepath.Join(dir, "docker-compose.override.yml")
+	os.WriteFile(legacy, []byte(legacyOverrideHeader+"\n# `docker compose up -d` merges it...\nservices:\n  ffshim:\n"), 0o644)
+	if !isGeneratedOverride(legacy) {
+		t.Fatal("legacy generated override not recognised")
+	}
+	// The repository example is not "generated".
+	example := filepath.Join(dir, "example.yml")
+	os.WriteFile(example, []byte(renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage})), 0o644)
+	if isGeneratedOverride(example) {
+		t.Fatal("example treated as generated")
+	}
+}

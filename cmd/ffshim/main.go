@@ -28,6 +28,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"jellyfin-ffmpeg-bridge/internal/proto"
@@ -37,9 +38,10 @@ import (
 var shimVersion = "dev" // set with -ldflags "-X main.shimVersion=..."
 
 const (
-	defaultAgent   = "host.docker.internal:7878"
-	localFFprobe   = "/usr/lib/jellyfin-ffmpeg/ffprobe"
-	dpkgStatusPath = "/var/lib/dpkg/status"
+	defaultAgent    = "host.docker.internal:7878"
+	secretTokenPath = "/run/secrets/ffshim_token"
+	localFFprobe    = "/usr/lib/jellyfin-ffmpeg/ffprobe"
+	dpkgStatusPath  = "/var/lib/dpkg/status"
 )
 
 func main() {
@@ -68,9 +70,9 @@ func fail(format string, a ...any) int {
 }
 
 func run(kind string, args []string) int {
-	token := os.Getenv("FFSHIM_TOKEN")
+	token := readToken(os.Getenv, os.ReadFile)
 	if token == "" {
-		return fail("FFSHIM_TOKEN is not set (run `ffagent token` on the agent machine)")
+		return fail("no token: set FFSHIM_TOKEN, FFSHIM_TOKEN_FILE, or the compose secret %s (run `ffagent token` on the agent machine)", secretTokenPath)
 	}
 	addr := os.Getenv("FFSHIM_AGENT")
 	if addr == "" {
@@ -245,4 +247,20 @@ func copyExecutable(src, dst string) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// readToken finds the shared token: FFSHIM_TOKEN, else the file named by
+// FFSHIM_TOKEN_FILE, else the compose secret written by `ffagent install`.
+func readToken(getenv func(string) string, readFile func(string) ([]byte, error)) string {
+	if t := strings.TrimSpace(getenv("FFSHIM_TOKEN")); t != "" {
+		return t
+	}
+	file := getenv("FFSHIM_TOKEN_FILE")
+	if file == "" {
+		file = secretTokenPath
+	}
+	if b, err := readFile(file); err == nil {
+		return strings.TrimSpace(string(b))
+	}
+	return ""
 }

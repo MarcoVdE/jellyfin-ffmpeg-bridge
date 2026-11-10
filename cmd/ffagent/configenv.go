@@ -45,6 +45,11 @@ var envOverrides = []struct {
 	set  func(*Config, string)
 }{
 	{"FFAGENT_TOKEN", func(c *Config, v string) { c.Token = v }},
+	{"FFAGENT_TOKEN_FILE", func(c *Config, v string) {
+		if b, err := os.ReadFile(v); err == nil {
+			c.Token = strings.TrimSpace(string(b))
+		}
+	}},
 	{"FFAGENT_LISTEN", func(c *Config, v string) { c.Listen = v }},
 	{"FFAGENT_HEALTH_LISTEN", func(c *Config, v string) { c.HealthListen = v }},
 	{"FFAGENT_GPU", func(c *Config, v string) { c.GPU = v }},

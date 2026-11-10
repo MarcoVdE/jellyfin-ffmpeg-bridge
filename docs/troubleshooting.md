@@ -3,13 +3,13 @@
 Start with these two commands; most problems show up in one of them:
 
 ```powershell
-C:\ProgramData\ffagent\ffagent.exe status          # Windows side
+<compose folder>\ffagent\ffagent.exe status          # Windows side
 docker exec jellyfin /opt/ffshim/ffmpeg -ffshim-ping   # container → agent
 ```
 
 Logs:
 
-- Agent: `C:\ProgramData\ffagent\ffagent.log`
+- Agent: `<compose folder>\ffagent\ffagent.log`
 - Jellyfin: Dashboard → Logs. Each transcode has an `FFmpeg.Transcode-*.log`
   containing the full command and ffmpeg's output, including any `ffshim:`
   error line.
@@ -27,8 +27,10 @@ Logs:
 
 ### `ffshim: authentication failed`
 
-The token in `.env` doesn't match the agent's. Run `ffagent token`, fix `.env`,
-and run `docker compose up -d`. Changes to `.env` only apply when the container
+The container used the wrong token. With the generated override, Jellyfin reads
+it from the compose secret `ffagent\ffshim-token`: run the install again (it
+rewrites both), then `docker compose up -d`. For manual setups, compare
+`FFSHIM_TOKEN` with `ffagent token`. Token changes only apply when the container
 is recreated, not on `docker restart`.
 
 ### `cannot run on Windows: argument ... is VA-API only`
@@ -60,7 +62,7 @@ not running, or ffmpeg was still downloading, it may have detected nothing.
 ### GPU self-test fails (`selftest_failed`, `hw_errors`)
 
 ```powershell
-C:\ProgramData\ffagent\ffagent.exe selftest
+<compose folder>\ffagent\ffagent.exe selftest
 ```
 
 - Install the latest Intel graphics driver from Intel's site. Windows Update
@@ -142,8 +144,8 @@ container at the same container path as in Jellyfin's container. Compare the
 ### Collecting details for a bug report
 
 ```powershell
-C:\ProgramData\ffagent\ffagent.exe status --json
-Get-Content C:\ProgramData\ffagent\ffagent.log -Tail 100
+<compose folder>\ffagent\ffagent.exe status --json
+Get-Content <compose folder>\ffagent\ffagent.log -Tail 100
 ```
 
 Plus the failing `FFmpeg.Transcode-*.log` from Jellyfin. Remove the token if it

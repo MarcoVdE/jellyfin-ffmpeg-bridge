@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -37,12 +38,104 @@ const (
 	errorAlreadyAssigned            = 85
 )
 
-func dataDir() string {
+// programDataDir is the classic install location, and where the pointer to
+// the current install location is kept.
+func programDataDir() string {
 	pd := os.Getenv("ProgramData")
 	if pd == "" {
 		pd = `C:\ProgramData`
 	}
 	return filepath.Join(pd, "ffagent")
+}
+
+// locationFile records where ffagent is installed when that isn't
+// programDataDir (normally <compose folder>\ffagent).
+func locationFile() string { return filepath.Join(programDataDir(), "install-dir.txt") }
+
+var (
+	dataDirOnce sync.Once
+	dataDirVal  string
+)
+
+// dataDir is the folder holding ffagent.conf, the log and downloaded ffmpeg:
+// FFAGENT_HOME, else the folder of this exe if it holds a config (the
+// installed copy), else the recorded install location, else ProgramData.
+func dataDir() string {
+	dataDirOnce.Do(func() {
+		if d := os.Getenv("FFAGENT_HOME"); d != "" {
+			dataDirVal = d
+			return
+		}
+		if exe, err := os.Executable(); err == nil {
+			if d := filepath.Dir(exe); fileExistsAt(filepath.Join(d, "ffagent.conf")) {
+				dataDirVal = d
+				return
+			}
+		}
+		if b, err := os.ReadFile(locationFile()); err == nil {
+			if d := strings.TrimSpace(string(b)); d != "" && fileExistsAt(filepath.Join(d, "ffagent.conf")) {
+				dataDirVal = d
+				return
+			}
+		}
+		dataDirVal = programDataDir()
+	})
+	return dataDirVal
+}
+
+// ---- Elevation -----------------------------------------------------------
+
+var (
+	shell32           = syscall.NewLazyDLL("shell32.dll")
+	procShellExecuteW = shell32.NewProc("ShellExecuteW")
+)
+
+// relaunchElevated starts this exe again with args in a new Administrator
+// window (Windows shows the UAC prompt) and returns. The new window stays
+// open until Enter is pressed, see pauseIfOwnConsole.
+func relaunchElevated(args []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = syscall.EscapeArg(a)
+	}
+	cwd, _ := os.Getwd()
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(exe)
+	params, _ := syscall.UTF16PtrFromString(strings.Join(quoted, " "))
+	dir, _ := syscall.UTF16PtrFromString(cwd)
+	r, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(params)), uintptr(unsafe.Pointer(dir)), 1 /* SW_SHOWNORMAL */)
+	if r <= 32 {
+		if r == 5 {
+			return errors.New("administrator rights are needed (the Windows prompt was declined)")
+		}
+		return fmt.Errorf("could not start as administrator (error %d); run it from Terminal (Admin)", r)
+	}
+	fmt.Println("Continuing in a new Administrator window ...")
+	skipPause = true // this window has nothing more to show
+	return nil
+}
+
+// noArgs handles starting ffagent without arguments (double-click): set up
+// for the compose file next to the exe, or show the status of an install.
+func noArgs() int {
+	exe, err := os.Executable()
+	if err == nil {
+		if f := findComposeFile(filepath.Dir(exe)); f != "" {
+			fmt.Println("Found", f)
+			return dispatch("install", []string{"--compose", f})
+		}
+	}
+	if fileExistsAt(filepath.Join(dataDir(), "ffagent.conf")) {
+		return dispatch("status", nil)
+	}
+	fmt.Printf(usageText, agentVersion, dataDir())
+	fmt.Println("\nTip: put ffagent.exe next to your Jellyfin docker-compose.yml and double-click it.")
+	return 0
 }
 
 func setProcAttr(cmd *exec.Cmd) {

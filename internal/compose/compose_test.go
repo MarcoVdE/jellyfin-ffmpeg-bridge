@@ -111,3 +111,24 @@ func TestSplitShort(t *testing.T) {
 		}
 	}
 }
+
+func TestFindJellyfinService(t *testing.T) {
+	if s, err := FindJellyfinService(userCompose, "jellyfin"); err != nil || s != "jellyfin" {
+		t.Fatalf("got %q %v", s, err)
+	}
+	renamed := strings.Replace(userCompose, "  jellyfin:\n", "  media-server:\n", 1)
+	if s, err := FindJellyfinService(renamed, "jellyfin"); err != nil || s != "media-server" {
+		t.Fatalf("by image: got %q %v", s, err)
+	}
+	lsio := "services:\n  jf:\n    image: lscr.io/linuxserver/jellyfin:latest\n  db:\n    image: postgres\n"
+	if s, err := FindJellyfinService(lsio, "jellyfin"); err != nil || s != "jf" {
+		t.Fatalf("linuxserver: got %q %v", s, err)
+	}
+	if _, err := FindJellyfinService("services:\n  a:\n    image: nginx\n", "jellyfin"); err == nil {
+		t.Fatal("expected error without a Jellyfin service")
+	}
+	two := "services:\n  a:\n    image: jellyfin/jellyfin\n  b:\n    image: jellyfin/jellyfin:10.11\n"
+	if _, err := FindJellyfinService(two, "jellyfin"); err == nil {
+		t.Fatal("expected ambiguity error")
+	}
+}

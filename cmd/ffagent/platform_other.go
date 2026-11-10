@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -55,3 +56,8 @@ func uninstallCmd() error       { return errWindowsOnly }
 func restartCmd() error         { return errWindowsOnly }
 
 func pauseIfOwnConsole() {}
+
+func noArgs() int {
+	fmt.Printf(usageText, agentVersion, dataDir())
+	return 0
+}
