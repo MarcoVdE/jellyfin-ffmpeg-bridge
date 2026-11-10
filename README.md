@@ -152,7 +152,7 @@ with your folder.
 
 ```powershell
 cd C:\docker\jellyfin
-git clone https://github.com/<you>/jellyfin-ffmpeg-bridge
+git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
 ```
 
 ### 2. Build the agent

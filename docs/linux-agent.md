@@ -60,7 +60,7 @@ same `user: "uid:gid"` that owns the folders.
 
 ```sh
 mkdir ~/ffagent && cd ~/ffagent
-git clone https://github.com/<you>/jellyfin-ffmpeg-bridge
+git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
 cp jellyfin-ffmpeg-bridge/examples/linux-agent/docker-compose.yml .
 echo "FFSHIM_TOKEN=$(openssl rand -hex 24)" > .env
 ```
@@ -90,7 +90,7 @@ check the device or runtime configuration exactly as you would for Jellyfin.
 Next to Jellyfin's `docker-compose.yml`:
 
 ```sh
-git clone https://github.com/<you>/jellyfin-ffmpeg-bridge
+git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
 cp jellyfin-ffmpeg-bridge/examples/docker-compose.override.yml .
 ```
 
