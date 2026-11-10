@@ -76,9 +76,10 @@ func newInfoCache() *infoCache {
 	return &infoCache{entries: map[string]*infoEntry{}, run: runInfoCommand}
 }
 
-// get returns the (possibly cached) output, and how long ffmpeg ran if this
-// call ran it (0 when answered from memory). Failed runs are not kept.
-func (c *infoCache) get(exe string, args []string) (infoResult, time.Duration) {
+// get returns the (possibly cached) output, whether this call ran ffmpeg (as
+// opposed to answering from memory), and how long that took. Failed runs are
+// not kept.
+func (c *infoCache) get(exe string, args []string) (res infoResult, ran bool, took time.Duration) {
 	key := exe + "\x00" + strings.Join(args, "\x00")
 	c.mu.Lock()
 	e := c.entries[key]
@@ -88,8 +89,8 @@ func (c *infoCache) get(exe string, args []string) (infoResult, time.Duration) {
 	}
 	c.mu.Unlock()
 
-	var took time.Duration
 	e.once.Do(func() {
+		ran = true
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		start := time.Now()
@@ -103,7 +104,7 @@ func (c *infoCache) get(exe string, args []string) (infoResult, time.Duration) {
 		}
 		c.mu.Unlock()
 	}
-	return e.res, took
+	return e.res, ran, took
 }
 
 func runInfoCommand(ctx context.Context, exe string, args []string) infoResult {

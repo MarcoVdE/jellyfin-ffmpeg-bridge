@@ -227,8 +227,8 @@ func (a *Agent) runJob(r io.Reader, w *proto.Writer, h proto.HelloMsg) {
 	}
 
 	if isInfoCommand(res.Args) {
-		ir, took := a.info.get(exe, res.Args)
-		if took > 0 {
+		ir, ran, took := a.info.get(exe, res.Args)
+		if ran {
 			a.log.Printf("info %s: ran ffmpeg in %s, answered from memory from now on", summarizeArgs(res.Args), took.Round(time.Millisecond))
 		}
 		if ir.err != nil {
@@ -360,7 +360,7 @@ func (a *Agent) warmInfo() {
 		return
 	}
 	for _, args := range warmInfoCommands {
-		if _, took := a.info.get(exe, args); took > 0 {
+		if _, ran, took := a.info.get(exe, args); ran {
 			a.log.Printf("info %s: pre-ran ffmpeg in %s", summarizeArgs(args), took.Round(time.Millisecond))
 		}
 	}

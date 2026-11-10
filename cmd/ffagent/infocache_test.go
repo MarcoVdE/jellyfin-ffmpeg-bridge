@@ -49,7 +49,7 @@ func TestInfoCacheRunsOncePerExeAndRetriesFailures(t *testing.T) {
 	if runs.Load() != 1 {
 		t.Fatalf("concurrent gets ran %d times", runs.Load())
 	}
-	if r, _ := c.get("b.exe", []string{"-version"}); string(r.stdout) != "b.exe" || runs.Load() != 2 {
+	if r, _, _ := c.get("b.exe", []string{"-version"}); string(r.stdout) != "b.exe" || runs.Load() != 2 {
 		t.Fatal("a different ffmpeg must be asked separately")
 	}
 	fail.Store(true)
@@ -77,10 +77,12 @@ func TestWarmCommandsAreInfoCommands(t *testing.T) {
 func TestInfoCacheReportsRunTime(t *testing.T) {
 	c := newInfoCache()
 	c.run = func(context.Context, string, []string) infoResult { return infoResult{} }
-	if _, took := c.get("x", []string{"-version"}); took <= 0 {
-		t.Fatal("first call ran ffmpeg, took must be > 0")
+	// The run itself takes ~no time: "ran" must not be derived from the
+	// duration (Windows clocks can report 0 for very short runs).
+	if _, ran, _ := c.get("x", []string{"-version"}); !ran {
+		t.Fatal("first call ran ffmpeg")
 	}
-	if _, took := c.get("x", []string{"-version"}); took != 0 {
-		t.Fatal("second call is from memory, took must be 0")
+	if _, ran, took := c.get("x", []string{"-version"}); ran || took != 0 {
+		t.Fatal("second call is from memory")
 	}
 }
