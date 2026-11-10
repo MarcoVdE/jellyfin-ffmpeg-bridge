@@ -53,3 +53,5 @@ func mirrorRoot(*Config) string { return "/" }
 func installCmd([]string) error { return errWindowsOnly }
 func uninstallCmd() error       { return errWindowsOnly }
 func restartCmd() error         { return errWindowsOnly }
+
+func pauseIfOwnConsole() {}
