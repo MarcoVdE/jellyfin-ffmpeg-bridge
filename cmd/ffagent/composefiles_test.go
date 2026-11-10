@@ -7,12 +7,22 @@ import (
 	"testing"
 )
 
+// Regenerate with: UPDATE_EXAMPLES=1 go test -run TestExampleOverride ./cmd/ffagent
 func TestExampleOverrideMatchesGenerated(t *testing.T) {
-	want, err := os.ReadFile(filepath.Join("..", "..", "examples", "docker-compose.override.yml"))
+	file := filepath.Join("..", "..", "examples", "docker-compose.override.yml")
+	got := renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage})
+	if os.Getenv("UPDATE_EXAMPLES") != "" {
+		if err := os.WriteFile(file, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := renderOverride(overrideOpts{Service: "jellyfin", Build: "./jellyfin-ffmpeg-bridge"})
+	if strings.Contains(got, overrideMarker) {
+		t.Fatal("the example must not carry the generated marker")
+	}
 	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Fatalf("examples/docker-compose.override.yml is out of date; regenerate it:\n%s", got)
 	}
@@ -78,5 +88,12 @@ func TestSetEnvVar(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(f); string(b) != "TZ=Europe/Amsterdam\r\nFFSHIM_TOKEN=bbb\r\n# keep me\r\n" {
 		t.Fatalf("update: %q", b)
+	}
+}
+
+func TestGeneratedOverrideCarriesMarker(t *testing.T) {
+	got := renderOverride(overrideOpts{Service: "jellyfin", Image: defaultShimImage, Generated: true})
+	if !strings.HasPrefix(got, overrideMarker+"\n") {
+		t.Fatalf("missing marker:\n%s", got)
 	}
 }

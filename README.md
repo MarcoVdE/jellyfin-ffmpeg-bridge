@@ -47,7 +47,7 @@ Video is read and written directly in the shared folders on both sides.
 > **Status:** the protocol, the shim and the Linux agent are covered by
 > end-to-end tests. The Windows-specific parts (scheduled task, links, Job
 > Object, GPU self-tests) compile and are unit-tested, but haven't been run on
-> real Windows hardware yet. [Verify it works](#6-verify-it-works) walks
+> real Windows hardware yet. [Verify it works](#5-verify-it-works) walks
 > through checking them.
 
 ---
@@ -57,7 +57,7 @@ Video is read and written directly in the shared folders on both sides.
 - [Supported setups](#supported-setups)
 - [How it works](#how-it-works)
 - [Setup: Windows host](#setup-windows-host) (same machine; about 10 minutes)
-- [Jellyfin settings](#5-jellyfin-settings)
+- [Jellyfin settings](#4-jellyfin-settings)
 - [Agent on another Windows machine](docs/separate-machines.md)
 - [Agent on a Linux machine](docs/linux-agent.md)
 - [Monitoring with Home Assistant](docs/home-assistant.md)
@@ -146,7 +146,7 @@ read and write the _same files_ at the _same paths_:
 - **Linux:** the agent container mounts the same folders at the same container
   paths as Jellyfin.
 
-**Translation (Windows + Intel).** With the [Jellyfin settings](#5-jellyfin-settings)
+**Translation (Windows + Intel).** With the [Jellyfin settings](#4-jellyfin-settings)
 below, Jellyfin's Linux and Windows Quick Sync pipelines differ only in how the
 GPU is opened, so the agent rewrites that one argument:
 
@@ -184,43 +184,47 @@ the same Windows machine. For other setups see
 - An up-to-date graphics driver from Intel or NVIDIA (not only Windows Update).
 - **Docker Desktop** with a working Jellyfin `docker compose` setup using the
   official `jellyfin/jellyfin` image.
-- **git** to clone this repository (or download it as a zip).
 
 The examples assume your compose project is in `C:\docker\jellyfin`. Replace it
 with your folder.
 
-### 1. Get the code next to your compose file
+### 1. Download the agent
+
+Download **`ffagent.exe`** from the
+[latest release](https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge/releases)
+(under *Assets*; `ffagent-arm64.exe` for Windows on ARM), for example to your
+Downloads folder. You don't need to keep it there: the install copies it to
+`C:\ProgramData\ffagent\`.
+
+> Windows SmartScreen or Defender may warn about `ffagent.exe` because it isn't
+> signed. Each release lists `SHA256SUMS`; compare with
+> `Get-FileHash .\ffagent.exe`.
+
+<details><summary>Or build it from source</summary>
+
+Clone the repository **next to your compose file** and build with Docker (no Go
+install needed). Then run step 2 from the clone instead; the generated override
+file will build the shim image from the clone rather than pulling it.
 
 ```powershell
 cd C:\docker\jellyfin
 git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
-```
-
-### 2. Build the agent
-
-Docker is all you need; no Go install required. In PowerShell:
-
-```powershell
-cd C:\docker\jellyfin\jellyfin-ffmpeg-bridge
+cd jellyfin-ffmpeg-bridge
 docker run --rm -v "${PWD}:/src" -w /src -e CGO_ENABLED=0 -e GOOS=windows golang:1-alpine `
   go build -buildvcs=false -trimpath -o ffagent.exe ./cmd/ffagent
 ```
 
-<details><summary>With Go installed instead</summary>
-
-```powershell
-$env:CGO_ENABLED = "0"; go build -trimpath -o ffagent.exe ./cmd/ffagent
-```
+In step 3, use `docker compose up -d --build`.
 
 </details>
 
-### 3. Install the agent
+### 2. Install the agent
 
 Open **Terminal as Administrator** (right-click Start → Terminal (Admin)):
 
 ```powershell
-cd C:\docker\jellyfin\jellyfin-ffmpeg-bridge
-.\ffagent.exe install --compose ..\docker-compose.yml
+cd $HOME\Downloads
+.\ffagent.exe install --compose C:\docker\jellyfin\docker-compose.yml
 ```
 
 For an NVIDIA GPU add `--gpu nvidia`. This:
@@ -229,8 +233,9 @@ For an NVIDIA GPU add `--gpu nvidia`. This:
   mirrors them on `C:\` (use `--service name` if your service has another name);
 - creates `C:\ProgramData\ffagent\` with the config and a random token;
 - writes `FFSHIM_TOKEN=...` into the `.env` file next to your compose file;
-- writes `docker-compose.override.yml` next to your compose file. It never
-  overwrites an existing one; if you already have one, it tells you what to do;
+- writes `docker-compose.override.yml` next to your compose file, using the
+  shim image of the same release. It never overwrites an existing override
+  file; if you already have one, it tells you what to do;
 - registers a boot-time task that runs the agent as SYSTEM, restarts it if it
   crashes, and opens ports 7878/7879 in the firewall for your local network;
 - starts the agent, which downloads the matching jellyfin-ffmpeg (about 90 MB).
@@ -238,14 +243,11 @@ For an NVIDIA GPU add `--gpu nvidia`. This:
 Check the output for path problems, for example a folder in your compose file
 that doesn't exist.
 
-> Windows SmartScreen or Defender may warn about `ffagent.exe` because it isn't
-> signed. You built it yourself from this source.
-
-### 4. Restart Jellyfin with the shim
+### 3. Restart Jellyfin with the shim
 
 ```powershell
 cd C:\docker\jellyfin
-docker compose up -d --build
+docker compose up -d
 ```
 
 Compose merges `docker-compose.override.yml` automatically. It adds a one-shot
@@ -253,7 +255,7 @@ Compose merges `docker-compose.override.yml` automatically. It adds a one-shot
 at it, and adds a 5-minute heartbeat to Jellyfin's healthcheck. See
 [`examples/docker-compose.override.yml`](examples/docker-compose.override.yml).
 
-### 5. Jellyfin settings
+### 4. Jellyfin settings
 
 **Dashboard → Playback → Transcoding.** Use the table for your GPU, save, then
 **restart the Jellyfin container once** (`docker restart jellyfin`) so it
@@ -286,7 +288,7 @@ re-detects ffmpeg's capabilities through the agent.
 that GPU (QSV for Intel, VA-API for AMD), exactly as if the GPU were in the
 Jellyfin machine. No restrictions apply, because nothing is translated.
 
-### 6. Verify it works
+### 5. Verify it works
 
 1. On Windows: `C:\ProgramData\ffagent\ffagent.exe status` should show
    `Status: OK`, a jellyfin-ffmpeg version, `GPU test: OK` and every path `ok`.
@@ -307,7 +309,7 @@ Jellyfin machine. No restrictions apply, because nothing is translated.
 
 If anything fails, see [troubleshooting](docs/troubleshooting.md).
 
-### 7. Optional: monitoring
+### 6. Optional: monitoring
 
 Set up the [Home Assistant notifications](docs/home-assistant.md) to be told
 when the agent is down or transcoding stops working, for example after a
@@ -322,7 +324,7 @@ Jellyfin update.
 | **Jellyfin**                  | As before (Watchtower or `docker compose pull`).                                                                                                                                                                           |
 | **ffmpeg on a Windows agent** | Automatic: the agent notices the new jellyfin-ffmpeg version on the next connection and installs it before running the job. If that fails, the previous version keeps working and `/health` reports `version_sync_failed`. |
 | **ffmpeg on a Linux agent**   | Comes with the agent's Jellyfin image. Let Watchtower update it too (same tag as Jellyfin); `/health` reports `version_mismatch` until both match.                                                                         |
-| **This project**              | `git pull`, rebuild `ffagent.exe` (step 2), run `ffagent.exe install --compose ..\docker-compose.yml` again (keeps your token and settings), then `docker compose up -d --build`.                                          |
+| **This project**              | Download the new `ffagent.exe` and run `ffagent.exe install --compose C:\docker\jellyfin\docker-compose.yml` again (keeps your token and settings; it updates the image tag in the override file only if the file still contains the shim, otherwise see its output), then `docker compose up -d`.                                          |
 
 If Jellyfin was updated and started before the new ffmpeg was ready, `/health`
 reports `restart_jellyfin`; run `docker restart jellyfin`.
@@ -345,7 +347,7 @@ Administrator terminal.
 
 | Command                                                           | Does                                                                                                    |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `install [--compose FILE] [--service NAME] [--gpu intel\|nvidia]` | Install or update; see [step 3](#3-install-the-agent). Without `--compose` it keeps the existing paths. |
+| `install [--compose FILE] [--service NAME] [--gpu intel\|nvidia]` | Install or update; see [step 2](#2-install-the-agent). Without `--compose` it keeps the existing paths. |
 | `status [--json]`                                                 | Show health: versions, GPU test, paths, jobs, last error.                                               |
 | `token`                                                           | Print the token for `FFSHIM_TOKEN`.                                                                     |
 | `selftest`                                                        | Run the GPU self-test with the installed ffmpeg.                                                        |

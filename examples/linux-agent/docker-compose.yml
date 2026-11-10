@@ -6,15 +6,13 @@
 # updates them together with your Jellyfin.
 #
 # Expects:
-#   - this repository cloned next to this file as ./jellyfin-ffmpeg-bridge
 #   - FFSHIM_TOKEN=... in the .env file next to this file (same value as on
 #     the Jellyfin machine)
 
 services:
   # One-shot: copies the agent binary into the "ffshim" volume, then exits.
   ffshim:
-    build: ./jellyfin-ffmpeg-bridge
-    image: jellyfin-ffshim:local
+    image: ghcr.io/marcovde/jellyfin-ffmpeg-bridge:latest
     volumes:
       - ffshim:/out
     restart: "no"

@@ -84,7 +84,7 @@ sudo systemctl restart smbd
 
 ### 2. Install the agent (server B, Windows)
 
-Follow the main [setup](../README.md#setup-windows-host) steps 1–3, but run install **without**
+Follow the main [setup](../README.md#setup-windows-host) steps 1–2, but run install **without**
 `--compose`. Your compose file is on the other machine and its paths don't
 apply here (add `--gpu nvidia` for an NVIDIA GPU):
 
@@ -119,21 +119,27 @@ Every path must show `ok`. Note the token: `ffagent token`.
 
 ### 3. Add the shim to Jellyfin (server A)
 
-Clone this repository next to your compose file on server A, copy
+Download
 [`examples/docker-compose.override.yml`](../examples/docker-compose.override.yml)
-next to it, and:
+next to your compose file on server A:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/MarcoVdE/jellyfin-ffmpeg-bridge/main/examples/docker-compose.override.yml
+```
+
+Then:
 
 - set `FFSHIM_AGENT: <windows-ip>:7878` (uncomment the line);
 - the `extra_hosts` lines can stay; they are harmless;
 - put the token in `.env`: `FFSHIM_TOKEN=...`.
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 docker exec jellyfin /opt/ffshim/ffmpeg -ffshim-ping
 ```
 
-Then apply the [Jellyfin settings](../README.md#5-jellyfin-settings) and
-[verify](../README.md#6-verify-it-works).
+Then apply the [Jellyfin settings](../README.md#4-jellyfin-settings) and
+[verify](../README.md#5-verify-it-works).
 
 ## Firewall
 

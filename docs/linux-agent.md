@@ -66,8 +66,7 @@ same `user: "uid:gid"` that owns the folders.
 
 ```sh
 mkdir ~/ffagent && cd ~/ffagent
-git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
-cp jellyfin-ffmpeg-bridge/examples/linux-agent/docker-compose.yml .
+curl -fsSLO https://raw.githubusercontent.com/MarcoVdE/jellyfin-ffmpeg-bridge/main/examples/linux-agent/docker-compose.yml
 echo "FFSHIM_TOKEN=$(openssl rand -hex 24)" > .env
 ```
 
@@ -84,7 +83,7 @@ Edit `docker-compose.yml`:
   you pin versions.
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 docker exec ffagent /opt/ffshim/ffagent status
 ```
 
@@ -96,8 +95,7 @@ check the device or runtime configuration exactly as you would for Jellyfin.
 Next to Jellyfin's `docker-compose.yml`:
 
 ```sh
-git clone https://github.com/MarcoVdE/jellyfin-ffmpeg-bridge
-cp jellyfin-ffmpeg-bridge/examples/docker-compose.override.yml .
+curl -fsSLO https://raw.githubusercontent.com/MarcoVdE/jellyfin-ffmpeg-bridge/main/examples/docker-compose.override.yml
 ```
 
 In `docker-compose.override.yml`, uncomment and set
@@ -105,7 +103,7 @@ In `docker-compose.override.yml`, uncomment and set
 
 ```sh
 echo "FFSHIM_TOKEN=<token from machine B's .env>" >> .env
-docker compose up -d --build
+docker compose up -d
 docker exec jellyfin /opt/ffshim/ffmpeg -ffshim-ping
 ```
 
@@ -117,7 +115,7 @@ AMD, NVENC for NVIDIA. Device paths such as `/dev/dri/renderD128` refer to
 machine B. Then `docker restart jellyfin` so it re-detects ffmpeg's
 capabilities through the agent.
 
-Verify as in the [README](../README.md#6-verify-it-works). `Available hwaccel
+Verify as in the [README](../README.md#5-verify-it-works). `Available hwaccel
 types` in Jellyfin's log now shows what machine B's ffmpeg supports.
 
 ## Versions

@@ -178,7 +178,7 @@ func writeComposeFiles(composeFile, service, token string) ([]string, error) {
 	notes = append(notes, "set FFSHIM_TOKEN in "+envFile)
 
 	exe, _ := os.Executable()
-	opts := overrideOpts{Service: service, Build: repoBuildContext(filepath.Dir(exe), dir), Image: shimImage}
+	opts := overrideOpts{Service: service, Build: repoBuildContext(filepath.Dir(exe), dir), Image: shimImage, Generated: true}
 	if opts.Build == "" && opts.Image == "" {
 		return append(notes,
 			"could not find this repository next to ffagent.exe, so no override file was written.",
@@ -190,10 +190,14 @@ func writeComposeFiles(composeFile, service, token string) ([]string, error) {
 	target := overridePath(abs)
 	if target != "" && fileExists(target) {
 		b, _ := os.ReadFile(target)
-		if strings.Contains(string(b), "ffshim") {
-			return append(notes, target+" already contains the shim, left unchanged"), nil
+		switch {
+		case strings.Contains(string(b), overrideMarker):
+			// Ours: rewrite below (picks up a new image tag or service name).
+		case strings.Contains(string(b), "ffshim"):
+			return append(notes, target+" already contains the shim (edited by hand), left unchanged"), nil
+		default:
+			target = ""
 		}
-		target = ""
 	}
 	if target == "" {
 		alt := filepath.Join(dir, "ffshim.override.yml")

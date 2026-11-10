@@ -2,7 +2,6 @@
 # `docker compose up -d` merges it automatically with the main file.
 #
 # Expects:
-#   - this repository cloned next to it as ./jellyfin-ffmpeg-bridge
 #   - FFSHIM_TOKEN=... in the .env file next to it (from `ffagent install`)
 #   - your Jellyfin service to be called "jellyfin" (rename below if not)
 
@@ -31,8 +30,7 @@ services:
 
   # One-shot: copies the shim into the "ffshim" volume, then exits.
   ffshim:
-    build: ./jellyfin-ffmpeg-bridge
-    image: jellyfin-ffshim:local
+    image: ghcr.io/marcovde/jellyfin-ffmpeg-bridge:latest
     volumes:
       - ffshim:/out
     restart: "no"
