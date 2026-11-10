@@ -156,9 +156,11 @@ func TestSyncFailureKeepsWorkingVersion(t *testing.T) {
 		t.Fatal("expected retry backoff")
 	}
 	f.failedAt = time.Now().Add(-2 * syncRetryBackoff)
-	if f.StartSync() == nil {
+	ch := f.StartSync()
+	if ch == nil {
 		t.Fatal("expected retry after backoff")
 	}
+	<-ch // let the retry finish before the temp dir is removed
 }
 
 func TestSyncUnknownVersionWithoutFFmpeg(t *testing.T) {

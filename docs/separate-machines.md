@@ -5,14 +5,26 @@ The shim and agent talk over plain TCP, so Jellyfin can run on one machine
 Windows machine with an Intel or NVIDIA GPU. For a Linux GPU machine, see
 [Agent on a Linux machine](linux-agent.md) instead.
 
-```
- Server A (Jellyfin in Docker)                        Server B (Windows, Intel GPU)
-┌─────────────────────────────────┐   TCP :7878     ┌────────────────────────────────┐
-│ Jellyfin ─▶ ffshim  ────────────┼────────────────▶│ ffagent ─▶ jellyfin-ffmpeg.exe │
-│                                 │                 │                                │
-│ /cache, /config  ◀──── SMB ─────┼─────────────────┼── C:\cache  → \\server-a\cache │
-│ /media           ◀── NAS share ─┼─────────────────┼── C:\media  → \\nas\media      │
-└─────────────────────────────────┘                 └────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph A["Server A: Jellyfin in Docker"]
+        JF["Jellyfin"] -- "runs ffmpeg" --> SH["ffshim"]
+        AC[("/cache, /config")]
+    end
+
+    subgraph B["Server B: Windows with Intel or NVIDIA GPU"]
+        AG["ffagent"] -- "runs" --> FF["jellyfin-ffmpeg.exe"]
+        L["C:\cache, C:\config, C:\media<br/>(links to the shares)"]
+    end
+
+    NAS[("NAS: media")]
+
+    SH -- "TCP 7878" --> AG
+    FF --- L
+    L -- "SMB" --> AC
+    L -- "SMB" --> NAS
+    JF --- AC
+    JF --- NAS
 ```
 
 **What changes compared to one machine:**

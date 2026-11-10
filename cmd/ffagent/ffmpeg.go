@@ -167,6 +167,11 @@ func (f *FFmpeg) StartSync() <-chan struct{} {
 func (f *FFmpeg) sync(target string, done chan struct{}) {
 	f.log.Printf("installing jellyfin-ffmpeg %s", orLatest(target))
 	ver, exe, err := f.install(context.Background(), target)
+	if err == nil {
+		// Before signalling done, so nobody waiting on the sync (or a test's
+		// temp dir cleanup) races with the removal of old versions.
+		f.cleanup(ver)
+	}
 
 	f.mu.Lock()
 	if err != nil {
@@ -182,10 +187,6 @@ func (f *FFmpeg) sync(target string, done chan struct{}) {
 	f.syncing = nil
 	f.mu.Unlock()
 	close(done)
-
-	if err == nil {
-		f.cleanup(ver)
-	}
 }
 
 type ghRelease struct {

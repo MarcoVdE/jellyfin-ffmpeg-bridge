@@ -8,15 +8,21 @@ Both sides run Linux, so **nothing is translated**. Jellyfin's commands run
 exactly as they would locally, and every Jellyfin hardware acceleration mode
 works, including VA-API for AMD.
 
-```
- Machine A: Jellyfin                                Machine B: GPU
-┌────────────────────────────────┐   TCP :7878    ┌──────────────────────────────────────┐
-│ jellyfin/jellyfin              │───────────────▶│ jellyfin/jellyfin image running      │
-│   JELLYFIN_FFMPEG=ffshim       │                │   ffagent (instead of Jellyfin)      │
-│   /cache /config /media        │                │   /cache /config /media (same paths) │
-└────────────────────────────────┘                └──────────────────────────────────────┘
-          ▲                                                     │
-          └──────────────── shared folders (NFS / SMB) ─────────┘
+```mermaid
+flowchart LR
+    subgraph A["Machine A: Jellyfin"]
+        JF["jellyfin/jellyfin<br/>JELLYFIN_FFMPEG = ffshim"]
+    end
+
+    subgraph B["Machine B: GPU"]
+        AG["jellyfin/jellyfin image<br/>running ffagent instead of Jellyfin"]
+    end
+
+    FILES[("Shared folders (NFS / SMB)<br/>/cache · /config · /media<br/>same container paths on both")]
+
+    JF -- "TCP 7878" --> AG
+    JF <--> FILES
+    AG <--> FILES
 ```
 
 **Why the agent runs in the Jellyfin image:** that image already contains

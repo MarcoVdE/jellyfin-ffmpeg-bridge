@@ -17,17 +17,32 @@ Jellyfin as before.
 
 > Unofficial community project, not affiliated with the Jellyfin project.
 
+```mermaid
+flowchart LR
+    subgraph C["Jellyfin container (official image, unmodified)"]
+        JF["Jellyfin"]
+        SH["ffshim<br/>at /opt/ffshim/ffmpeg"]
+        JF -- "runs ffmpeg" --> SH
+    end
+
+    subgraph G["GPU machine (Windows or Linux)"]
+        AG["ffagent"]
+        FF["jellyfin-ffmpeg<br/>QSV · NVENC · VA-API"]
+        AG -- "runs" --> FF
+    end
+
+    SH -- "TCP 7878: arguments, stdin" --> AG
+    AG -. "stdout, stderr (progress), exit code" .-> SH
+
+    FILES[("Same files, same paths<br/>/media · /cache · /config")]
+    JF <--> FILES
+    FF <--> FILES
+
+    HA["Home Assistant"] -- "GET :7879/health" --> AG
 ```
- Jellyfin container (official image, unmodified)          GPU machine (Windows or Linux)
-┌─────────────────────────────────────────┐            ┌──────────────────────────────────┐
-│ Jellyfin ──runs──▶ /opt/ffshim/ffmpeg   │    TCP     │ ffagent                          │
-│                    (ffshim)  ───────────┼── :7878 ──▶│   └─▶ jellyfin-ffmpeg            │
-│                    ◀── stderr/stdout ───┼────────────┤        (QSV / NVENC / VA-API)    │
-│                         exit code       │            │                                  │
-│ /media, /cache, ...  ◀── same files ────┼────────────┼─▶ same paths (links or mounts)   │
-└─────────────────────────────────────────┘            │ :7879/health ◀── Home Assistant  │
-                                                       └──────────────────────────────────┘
-```
+
+Only the command line and ffmpeg's output go over the network connection.
+Video is read and written directly in the shared folders on both sides.
 
 > **Status:** the protocol, the shim and the Linux agent are covered by
 > end-to-end tests. The Windows-specific parts (scheduled task, links, Job
@@ -78,17 +93,43 @@ The agent picks the translation automatically from its `gpu` setting.
 | `ffshim`  | inside the Jellyfin container, as `/opt/ffshim/ffmpeg`                        | Pretends to be ffmpeg. Sends the command line to the agent and relays stdin, stdout, stderr and the exit code back to Jellyfin. |
 | `ffagent` | where ffmpeg should run: a boot-time task on Windows, or a container on Linux | Runs jellyfin-ffmpeg with those arguments, keeps it at the same version as the Jellyfin image, and reports health.              |
 
-**Communication.** The shim opens a TCP connection to the agent (port 7878) for
-every ffmpeg run:
+**Communication.** The shim opens one TCP connection to the agent (port 7878)
+for every ffmpeg run:
 
-1. The agent sends a random challenge; the shim answers with an HMAC of it,
-   keyed with the shared **token**. The token itself never crosses the network.
-2. The shim sends the arguments as a JSON list, so no shell quoting is involved.
-3. Output streams back as it is produced, so Jellyfin sees ffmpeg's progress live.
-4. When Jellyfin stops a transcode it writes `q` to stdin, which is forwarded,
-   or it kills the shim. A dropped connection makes the agent kill ffmpeg
-   immediately, so no orphaned ffmpeg is left holding the GPU. ffmpeg also dies
-   if the agent dies (Job Object on Windows, parent-death signal on Linux).
+```mermaid
+sequenceDiagram
+    participant J as Jellyfin
+    participant S as ffshim
+    participant A as ffagent
+    participant F as ffmpeg
+
+    J->>S: runs ffmpeg with arguments
+    S->>A: connect to port 7878
+    A-->>S: random challenge
+    S->>A: HMAC(token, challenge) + arguments
+    A->>F: start (arguments translated if needed)
+    loop while transcoding
+        F-->>A: stdout / stderr
+        A-->>S: stdout / stderr
+        S-->>J: progress
+    end
+    J->>S: "q" on stdin (stop)
+    S->>A: "q"
+    A->>F: "q"
+    F-->>A: exit code
+    A-->>S: exit code
+    S-->>J: exit code
+```
+
+- **Authentication:** the agent sends a random challenge and the shim answers
+  with an HMAC of it, keyed with the shared **token**. The token itself never
+  crosses the network.
+- **Arguments** travel as a JSON list, so no shell quoting is involved.
+- **Output** streams back as ffmpeg produces it, so Jellyfin sees progress live.
+- **Stopping:** if Jellyfin kills the shim instead of sending `q` (seeking,
+  quality change), the connection drops and the agent kills ffmpeg
+  immediately, so no orphaned ffmpeg holds the GPU. ffmpeg also dies if the
+  agent dies (Job Object on Windows, parent-death signal on Linux).
 
 On the same Windows machine the container reaches the host through Docker
 Desktop's `host.docker.internal`. On another machine, the shim points at that
