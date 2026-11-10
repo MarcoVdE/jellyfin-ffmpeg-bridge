@@ -241,6 +241,15 @@ func installCmd(args []string) error {
 	default:
 		fmt.Println("Then set the Jellyfin transcoding options listed in the README (Intel QuickSync).")
 	}
+
+	// The exe used for installing is an identical copy of the installed one:
+	// remove it once this window closes, so only ffagent\ffagent.exe remains.
+	if self, err := os.Executable(); err == nil && !samePath(self, exe) {
+		exitHooks = append(exitHooks, func() { deleteAfterExit(self, "") })
+		fmt.Println()
+		fmt.Println("Removed the installer", self)
+		fmt.Println("(an identical copy is installed; from now on use", exe+")")
+	}
 	return nil
 }
 
@@ -394,10 +403,13 @@ func uninstallCmd() error {
 	return nil
 }
 
-// deleteAfterExit removes the running exe and its (then empty) folder a few
-// seconds after this process has exited.
+// deleteAfterExit removes the running exe, and dir when given and then empty,
+// a few seconds after this process has exited (a running exe is locked).
 func deleteAfterExit(exe, dir string) {
-	script := fmt.Sprintf(`ping -n 4 127.0.0.1 >nul & del /f /q "%s" & rmdir "%s"`, exe, dir)
+	script := fmt.Sprintf(`ping -n 4 127.0.0.1 >nul & del /f /q "%s"`, exe)
+	if dir != "" {
+		script += fmt.Sprintf(` & rmdir "%s"`, dir)
+	}
 	cmd := exec.Command("cmd", "/c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	_ = cmd.Start()

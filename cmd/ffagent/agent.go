@@ -37,6 +37,7 @@ type Agent struct {
 	jobs   jobGroup
 	now    func() time.Time
 	linker func(*Config) []PathStatus
+	info   *infoCache
 }
 
 func NewAgent(cfg *Config, dataDir string, logger *log.Logger) *Agent {
@@ -47,6 +48,7 @@ func NewAgent(cfg *Config, dataDir string, logger *log.Logger) *Agent {
 		ff:     NewFFmpeg(dataDir, cfg.FFmpeg, cfg.GPU, cfg.Device, logger),
 		now:    time.Now,
 		linker: ensureLinks,
+		info:   newInfoCache(),
 	}
 	a.ff.onTested = func(err error) { a.state.SetSelftest(a.now(), err) }
 	return a
@@ -112,6 +114,7 @@ func (a *Agent) background(ctx context.Context) {
 		}
 	}
 	a.runSelftest(ctx)
+	a.warmInfo()
 
 	links := time.NewTicker(linkRetry)
 	tests := time.NewTicker(selftestInterval)
@@ -223,6 +226,29 @@ func (a *Agent) runJob(r io.Reader, w *proto.Writer, h proto.HelloMsg) {
 		a.state.Probed(ver)
 	}
 
+	if isInfoCommand(res.Args) {
+		ir := a.info.get(exe, res.Args)
+		if ir.err != nil {
+			a.state.JobError(a.now(), "start ffmpeg: "+ir.err.Error())
+			_ = w.Send(proto.Error, []byte("ffagent: start ffmpeg: "+ir.err.Error()))
+			return
+		}
+		out := ir.stdout
+		if len(res.ExtraHwaccels) > 0 {
+			out = translate.AppendHwaccels(out, res.ExtraHwaccels)
+		}
+		if len(ir.stderr) > 0 {
+			_ = w.Send(proto.Stderr, ir.stderr)
+		}
+		if len(out) > 0 {
+			_ = w.Send(proto.Stdout, out)
+		}
+		_ = w.Send(proto.Exit, proto.ExitPayload(ir.code))
+		return
+	}
+
+	started := time.Now()
+
 	cmd := exec.Command(exe, res.Args...)
 	cmd.Dir = a.workDir(h.Cwd)
 	setProcAttr(cmd)
@@ -276,6 +302,11 @@ func (a *Agent) runJob(r io.Reader, w *proto.Writer, h proto.HelloMsg) {
 	code := cmd.ProcessState.ExitCode()
 	wasCancelled := cancelled.Load()
 	a.state.JobFinished(a.now(), code, wasCancelled, tail.String())
+	outcome := fmt.Sprintf("exit %d", code)
+	if wasCancelled {
+		outcome = "stopped by Jellyfin"
+	}
+	a.log.Printf("job %s: %s after %s", summarizeArgs(res.Args), outcome, time.Since(started).Round(time.Millisecond))
 	if wasCancelled {
 		return
 	}
@@ -316,4 +347,25 @@ func (a *Agent) healthHandler() http.Handler {
 	mux.HandleFunc("GET /health", serve)
 	mux.HandleFunc("GET /{$}", serve)
 	return mux
+}
+
+// warmInfo pre-runs the info commands Jellyfin and plugins ask first, so even
+// the first request after a (re)start is answered instantly.
+func (a *Agent) warmInfo() {
+	exe, _ := a.ff.Exe()
+	if exe == "" {
+		return
+	}
+	for _, args := range [][]string{{"-version"}, {"-hwaccels"}} {
+		a.info.get(exe, args)
+	}
+}
+
+// summarizeArgs shortens a command line for the log.
+func summarizeArgs(args []string) string {
+	s := strings.Join(args, " ")
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	return s
 }

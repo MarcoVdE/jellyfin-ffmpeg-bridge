@@ -161,6 +161,12 @@ full-GPU pipeline on Linux when it believes VA-API exists. Anything VA-API
 specific that can't be translated is refused with a message naming the
 Jellyfin setting to change, and shows up in [monitoring](docs/home-assistant.md).
 
+**Fast answers to ffmpeg questions.** Jellyfin and plugins ask ffmpeg about
+itself (`-version`, `-hwaccels`, `-encoders`, `-h filter=...`) at startup,
+sometimes with tight timeouts (the Intro Skipper plugin allows 2 seconds). The
+answers never change for a given ffmpeg build, so the agent runs each such
+question once and then answers from memory.
+
 **Version sync.** The shim reports which jellyfin-ffmpeg the Jellyfin image
 ships. On Windows the agent downloads the matching build from the official
 [jellyfin-ffmpeg releases](https://github.com/jellyfin/jellyfin-ffmpeg/releases),
@@ -224,6 +230,8 @@ In step 3, use `docker compose up -d --build`.
 **Double-click `ffagent.exe`.** It finds the `docker-compose.yml` next to it,
 asks for administrator rights, and installs. The window shows the progress
 (jellyfin-ffmpeg download, GPU test) and stays open until you press Enter.
+When you close it, the `ffagent.exe` you started removes itself; the installed
+copy is `ffagent\ffagent.exe`.
 
 <details><summary>From a terminal instead (and options)</summary>
 

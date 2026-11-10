@@ -23,7 +23,7 @@ import (
 const fakeFFmpeg = `#!/bin/sh
 case "$1" in
   -hwaccels) printf 'Hardware acceleration methods:\nqsv\nd3d11va\nopencl\n\n'; exit 0 ;;
-  -version)  echo "ffmpeg version 8.1.3-Jellyfin"; exit 0 ;;
+  -version)  echo run >> "$0.count"; echo "ffmpeg version 8.1.3-Jellyfin"; exit 0 ;;
   -hwfail)   echo "[h264_qsv @ 0x1] Error creating a MFX session: -9." >&2; exit 1 ;;
   -readq)    echo started >&2; read line; echo "stdin:$line" >&2; exit 0 ;;
   -sleep)    echo started >&2; exec sleep 30 ;;
@@ -265,5 +265,62 @@ func TestWaitForReadyFollowsFirstStart(t *testing.T) {
 	h := waitForReadyWithin(cfg, 10*time.Second, 50*time.Millisecond)
 	if h == nil || h.FFmpeg.Version != "8.1.3-2" || h.Selftest.LastRun == nil || !h.Selftest.OK || h.Status != "ok" {
 		t.Fatalf("not ready: %+v", h)
+	}
+}
+
+// The real binary, started the way a double-click starts it (no arguments)
+// and with a few other argument shapes, must never crash.
+func TestBinaryArgumentShapes(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ffagent")
+	build := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-o", bin, ".")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	cases := []struct {
+		args []string
+		code int
+	}{
+		{nil, 0},
+		{[]string{"help"}, 0},
+		{[]string{"version"}, 0},
+		{[]string{"--compose", "x.yml"}, 2},
+		{[]string{"bogus"}, 2},
+		{[]string{"status", "--bogus"}, 1},
+	}
+	for _, c := range cases {
+		cmd := exec.Command(bin, c.args...)
+		cmd.Env = append(os.Environ(), "FFAGENT_HOME="+t.TempDir())
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(out), "panic:") || code != c.code {
+			t.Errorf("args %q: exit %d (want %d)\n%s", c.args, code, c.code, out)
+		}
+	}
+}
+
+// Info commands run ffmpeg once per executable; repeats come from memory, so
+// tight timeouts such as IntroSkipper's 2 s for -version are no problem.
+func TestE2EInfoCommandsAreCached(t *testing.T) {
+	h := newHarness(t)
+	countFile := h.agent.cfg.FFmpeg + ".count"
+	for i := 0; i < 5; i++ {
+		out, _, code := h.run("", "-version")
+		if code != 0 || !strings.Contains(out, "8.1.3-Jellyfin") {
+			t.Fatalf("run %d: code %d out %q", i, code, out)
+		}
+	}
+	b, _ := os.ReadFile(countFile)
+	if n := strings.Count(string(b), "run"); n != 1 {
+		t.Fatalf("ffmpeg -version ran %d times, want 1", n)
+	}
+	// A real job is never cached.
+	if _, _, code := h.run("", "-i", "/media/a.mkv"); code != 3 {
+		t.Fatalf("real job: exit %d", code)
 	}
 }

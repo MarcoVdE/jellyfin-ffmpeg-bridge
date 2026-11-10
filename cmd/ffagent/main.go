@@ -51,11 +51,11 @@ var (
 )
 
 func main() {
-	cmd := ""
+	cmd, rest := "", []string(nil)
 	if len(os.Args) > 1 {
-		cmd = os.Args[1]
+		cmd, rest = os.Args[1], os.Args[2:]
 	}
-	code := dispatch(cmd, os.Args[2:])
+	code := dispatch(cmd, rest)
 	// Started in a console window of its own (double-click, or Windows sudo
 	// in "new window" mode)? Keep it open so the output can be read. Never
 	// for "run": the boot task must exit (and be restarted) without waiting.
